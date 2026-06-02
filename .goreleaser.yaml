@@ -66,14 +66,3 @@ release:
     owner: emmayusufu
     name: tessera
   draft: true
-
-brews:
-  - name: tessera
-    repository:
-      owner: emmayusufu
-      name: homebrew-tessera
-    commit_msg_template: "tessera {{ .Version }}"
-    install: |
-      bin.install "coordinator"
-      bin.install "agent"
-      bin.install "tessera"
