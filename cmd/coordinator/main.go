@@ -76,8 +76,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	coord.Restore(auditLog)
-
 	log.Info("coordinator starting", "listen", *listenAddr, "http", *httpAddr, "https", *httpCert != "", "version", version.Version)
 	if err := coord.Serve(ctx, *httpAddr, *httpCert, *httpKey); err != nil {
 		log.Error("coordinator exited", "err", err)

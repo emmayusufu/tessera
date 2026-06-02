@@ -21,19 +21,12 @@ func Load(certPath, keyPath string) (Identity, error) {
 	return Identity{Cert: cert, Key: key}, nil
 }
 
-func LoadCert(certPath string) (Identity, error) {
-	cert, err := os.ReadFile(certPath)
-	if err != nil {
-		return Identity{}, err
-	}
-	return Identity{Cert: cert}, nil
-}
-
 func LoadPair(caFile, certFile, keyFile string) (id, ca Identity, err error) {
-	ca, err = LoadCert(caFile)
+	caCert, err := os.ReadFile(caFile)
 	if err != nil {
 		return Identity{}, Identity{}, err
 	}
+	ca = Identity{Cert: caCert}
 	id, err = Load(certFile, keyFile)
 	if err != nil {
 		return Identity{}, Identity{}, err

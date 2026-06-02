@@ -123,7 +123,7 @@ func runAgent(t *testing.T, e *env, ctx context.Context, allowed string) {
 	t.Helper()
 	ag := &agent.Agent{ShareID: "demo", Dial: e.agentDial, Allowed: []string{allowed}, Inner: e.innerServer}
 	go func() { _ = ag.Run(ctx) }()
-	waitFor(t, "agent registration", func() bool { return e.coord.Online("demo") })
+	waitFor(t, "agent registration", func() bool { return e.coord.AgentOnline("demo") })
 }
 
 func approveAndConnect(t *testing.T, e *env, target string) (sessionID string, ctl net.Conn) {
@@ -138,8 +138,8 @@ func approveAndConnect(t *testing.T, e *env, target string) (sessionID string, c
 		sid, ctl, err := client.Request(e.guestDial, "emma", "demo", target, "troubleshoot")
 		done <- res{sid, ctl, err}
 	}()
-	waitFor(t, "pending request", func() bool { return len(e.coord.PendingRequests()) == 1 })
-	if !e.coord.Approve(e.coord.PendingRequests()[0].ID) {
+	waitFor(t, "pending request", func() bool { return len(e.coord.PendingIDs()) == 1 })
+	if !e.coord.Approve(e.coord.PendingIDs()[0]) {
 		t.Fatal("approve failed")
 	}
 	select {
@@ -317,8 +317,8 @@ func TestRequestDenied(t *testing.T) {
 		_, _, err := client.Request(e.guestDial, "emma", "demo", "127.0.0.1:1", "nope")
 		errc <- err
 	}()
-	waitFor(t, "pending request", func() bool { return len(e.coord.PendingRequests()) == 1 })
-	e.coord.Deny(e.coord.PendingRequests()[0].ID, "not allowed")
+	waitFor(t, "pending request", func() bool { return len(e.coord.PendingIDs()) == 1 })
+	e.coord.Deny(e.coord.PendingIDs()[0], "not allowed")
 
 	select {
 	case err := <-errc:

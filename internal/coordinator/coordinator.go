@@ -224,9 +224,6 @@ func (c *Coordinator) handleConn(conn net.Conn) {
 	case proto.KindApprovalSubscribe:
 		defer conn.Close()
 		c.handleApprovalSubscribe(conn, m)
-	case proto.KindApprovalDecision:
-		defer conn.Close()
-		c.handleApprovalDecision(conn, m)
 	default:
 		conn.Close()
 	}
@@ -453,16 +450,21 @@ func (c *Coordinator) handleApprovalSubscribe(conn net.Conn, m proto.Msg) {
 	c.logger.Info("approver disconnected", "share_id", m.ShareID)
 }
 
-func (c *Coordinator) handleApprovalDecision(conn net.Conn, m proto.Msg) {
-	if peerFingerprint(conn) == "" {
-		_ = proto.WriteMsg(conn, proto.Msg{Kind: proto.KindDecision, Detail: "client certificate required"})
-		return
+func (c *Coordinator) pendingIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ids := make([]string, 0, len(c.requests))
+	for k := range c.requests {
+		ids = append(ids, k)
 	}
-	if m.Approved {
-		c.Approve(m.RequestID)
-	} else {
-		c.Deny(m.RequestID, m.Detail)
-	}
+	return ids
+}
+
+func (c *Coordinator) agentOnline(shareID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.agents[shareID]
+	return ok
 }
 
 func (c *Coordinator) resolve(requestID string, d decision) bool {
