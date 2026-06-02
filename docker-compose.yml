@@ -10,8 +10,6 @@ services:
     volumes:
       - ./certs:/etc/tessera/certs:ro
       - audit:/var/lib/tessera
-    environment:
-      TESSERA_OPERATOR_TOKEN: ""
     command:
       - "-listen=:8443"
       - "-http=:8080"

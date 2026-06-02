@@ -22,8 +22,7 @@ not a multi-tenant SaaS, and it is not a compliance product.
   traffic is dialed out to the coordinator.
 - A guest who has the share-id and the connect command but no approval.
   Every session needs a fresh tap from the host.
-- A guest who has a leaked approval URL but no live approver session
-  (with the upcoming rate limits and fragment-based tokens).
+- A guest who has a leaked approval URL but no live approver session.
 - A coordinator operator who can see traffic content. They cannot. The
   inner TLS terminates at the guest and the agent, so the relay sees
   only ciphertext.
@@ -57,6 +56,5 @@ This is a known, reviewed pattern, not a novel design.
   sessions.
 - One CA with no revocation list. Removing a guest's access means rotating
   the CA, not revoking a single certificate.
-- No rate limiting on the approval endpoint or stream lookups.
 
 These are tracked as future work, not oversights.
