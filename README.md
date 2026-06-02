@@ -206,12 +206,6 @@ makes "run the coordinator process" boring.
   appears in logs, so a leaked ID alone cannot approve. Operator actions (revoke)
   require an operator bearer token.
 
-Give each guest their own certificate so the binding is per-person:
-
-```bash
-./tessera issue --name alice   # writes alice.crt / alice.key
-```
-
 ## How it compares
 
 Tessera is tiny and single-purpose. Teleport's free Community Edition does far
