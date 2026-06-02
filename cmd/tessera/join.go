@@ -1,0 +1,224 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/emmayusufu/tessera/internal/certs"
+	"github.com/emmayusufu/tessera/internal/client"
+	"github.com/emmayusufu/tessera/internal/netutil"
+)
+
+type redeemResponse struct {
+	CAcert       string `json:"ca_cert"`
+	GuestCert    string `json:"guest_cert"`
+	GuestKey     string `json:"guest_key"`
+	CoordAddr    string `json:"coord_addr"`
+	ServerName   string `json:"server_name"`
+	AgentName    string `json:"agent_name"`
+	ShareID      string `json:"share_id"`
+	Target       string `json:"target"`
+	ExpectedName string `json:"expected_name"`
+	Reason       string `json:"reason"`
+}
+
+var codeAlphabet = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+func cmdJoin(args []string) {
+	fs := flag.NewFlagSet("join", flag.ExitOnError)
+	baseURL := fs.String("coord-base-url", "", "HTTP(S) base URL of the coordinator's /redeem endpoint (required)")
+	coordAddr := fs.String("coordinator", "", "coordinator mTLS host:port (defaults to base URL host + :8443)")
+	local := fs.String("local", "127.0.0.1:13000", "local address to forward from")
+	_ = fs.Parse(args)
+
+	if *baseURL == "" || *coordAddr == "" {
+		if c, _ := loadCoordinator(defaultConfigDir()); c != nil {
+			if *baseURL == "" {
+				*baseURL = c.BaseURL
+			}
+			if *coordAddr == "" {
+				*coordAddr = c.MtlsAddr
+			}
+		}
+	}
+	if *baseURL == "" {
+		fmt.Fprintln(os.Stderr, "join: -coord-base-url is required (run `tessera link` once to save it)")
+		os.Exit(2)
+	}
+
+	in := bufio.NewReader(os.Stdin)
+	var code string
+	if fs.NArg() > 0 {
+		code = fs.Arg(0)
+	} else {
+		fmt.Print("code: ")
+		line, err := in.ReadString('\n')
+		check(err)
+		code = line
+	}
+	normalized, err := normalizeCode(code)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	dialAddr, err := deriveCoordAddr(*baseURL, *coordAddr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	bundle, err := redeem(*baseURL, normalized)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	tmp, err := os.MkdirTemp("", "tessera-join-")
+	check(err)
+	defer os.RemoveAll(tmp)
+
+	caPath := filepath.Join(tmp, "ca.crt")
+	certPath := filepath.Join(tmp, "guest.crt")
+	keyPath := filepath.Join(tmp, "guest.key")
+	check(os.WriteFile(caPath, []byte(bundle.CAcert), 0o644))
+	check(os.WriteFile(certPath, []byte(bundle.GuestCert), 0o644))
+	check(os.WriteFile(keyPath, []byte(bundle.GuestKey), 0o600))
+
+	defaultWho := os.Getenv("USER")
+	if defaultWho == "" {
+		defaultWho = "guest"
+	}
+	fmt.Printf("Your name [the host will see this] (%s): ", defaultWho)
+	line, err := in.ReadString('\n')
+	check(err)
+	who := strings.TrimSpace(line)
+	if who == "" {
+		who = defaultWho
+	}
+
+	id, ca, err := certs.LoadPair(caPath, certPath, keyPath)
+	check(err)
+	outer, err := certs.ClientTLS(id, ca, bundle.ServerName)
+	check(err)
+	inner, err := certs.ClientTLS(id, ca, bundle.AgentName)
+	check(err)
+
+	dial := netutil.Dialer(func() (net.Conn, error) { return tls.Dial("tcp", dialAddr, outer) })
+
+	fmt.Printf("Connecting to %s's machine for: %s...\n", bundle.ExpectedName, bundle.Reason)
+	sessionID, ctl, err := client.Request(dial, who, bundle.ShareID, bundle.Target, bundle.Reason)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, joinDialError(err, dialAddr))
+		os.Exit(1)
+	}
+	defer ctl.Close()
+
+	ln, err := net.Listen("tcp", *local)
+	check(err)
+	fmt.Printf("approved. forwarding %s -> %s (Ctrl-C to end)\n", *local, bundle.Target)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := client.Forward(ctx, dial, ctl, sessionID, ln, inner, slog.Default()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println("session ended.")
+}
+
+func normalizeCode(raw string) (string, error) {
+	s := strings.ToUpper(strings.TrimSpace(raw))
+	s = strings.ReplaceAll(s, "-", "")
+	if len(s) != 8 {
+		return "", fmt.Errorf("code must be 8 characters (got %d)", len(s))
+	}
+	for _, r := range s {
+		if !strings.ContainsRune(codeAlphabet, r) {
+			return "", fmt.Errorf("code contains invalid character %q", r)
+		}
+	}
+	return s, nil
+}
+
+func deriveCoordAddr(baseURL, override string) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid -coord-base-url: %w", err)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("invalid -coord-base-url: missing host")
+	}
+	return net.JoinHostPort(host, "8443"), nil
+}
+
+func redeem(baseURL, code string) (*redeemResponse, error) {
+	endpoint := strings.TrimRight(baseURL, "/") + "/redeem/" + code
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, redeemDialError(err, baseURL)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return nil, errors.New("code not recognized; ask the host to re-run `tessera share`")
+	case http.StatusGone:
+		return nil, errors.New("code already used; ask the host for a new one")
+	case http.StatusLocked:
+		return nil, errors.New("too many wrong attempts; try again in a few minutes")
+	case http.StatusTooManyRequests:
+		return nil, errors.New("rate limited; wait a moment")
+	default:
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("redeem failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var out redeemResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decoding redeem response: %w", err)
+	}
+	return &out, nil
+}
+
+func redeemDialError(err error, baseURL string) error {
+	s := err.Error()
+	if strings.Contains(s, "timeout") || strings.Contains(s, "deadline") || strings.Contains(s, "refused") || strings.Contains(s, "no such host") {
+		return fmt.Errorf("could not reach the coordinator at %s; check your internet connection", baseURL)
+	}
+	return err
+}
+
+func joinDialError(err error, addr string) string {
+	s := err.Error()
+	if strings.Contains(s, "refused") || strings.Contains(s, "timeout") || strings.Contains(s, "no such host") {
+		return fmt.Sprintf("could not reach the coordinator at %s; check your internet connection", addr)
+	}
+	return s
+}
