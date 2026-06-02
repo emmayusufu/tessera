@@ -1,0 +1,25 @@
+services:
+  coordinator:
+    build: .
+    image: tessera:latest
+    container_name: tessera-coordinator
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+      - "8080:8080"
+    volumes:
+      - ./certs:/etc/tessera/certs:ro
+      - audit:/var/lib/tessera
+    environment:
+      TESSERA_OPERATOR_TOKEN: ""
+    command:
+      - "-listen=:8443"
+      - "-http=:8080"
+      - "-base-url=http://localhost:8080"
+      - "-ca=/etc/tessera/certs/ca.crt"
+      - "-cert=/etc/tessera/certs/coordinator.crt"
+      - "-key=/etc/tessera/certs/coordinator.key"
+      - "-audit=/var/lib/tessera/audit.jsonl"
+
+volumes:
+  audit:

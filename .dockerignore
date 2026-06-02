@@ -1,0 +1,15 @@
+.git
+.gitignore
+bin
+*.jsonl
+ca.crt
+ca.key
+coordinator.crt
+coordinator.key
+agent.crt
+agent.key
+guest.crt
+guest.key
+docker-compose.yml
+Dockerfile
+.dockerignore
