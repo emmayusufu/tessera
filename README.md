@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/emmayusufu/tessera/main/install.sh 
 
 On first run, you'll be prompted to link to a coordinator (skip with `TESSERA_SKIP_LINK=1`).
 
-Detects your OS and architecture, pulls the latest release binary if one is published, otherwise falls back to building from source via `go install`. Requires `curl` (preinstalled on macOS). Installs to `/usr/local/bin/tessera` (override with `TESSERA_BINDIR=/some/where`).
+Installs via `go install` (requires Go). Override the install location with `TESSERA_BINDIR`.
 
 If you'd rather build manually:
 
