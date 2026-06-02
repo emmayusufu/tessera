@@ -1,0 +1,12 @@
+/bin/
+*.crt
+*.key
+*-audit.jsonl
+.DS_Store
+deploy/
+/tessera
+*.jsonl
+*.test
+*.out
+operator-token
+*operator-token*
