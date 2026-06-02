@@ -228,6 +228,25 @@ func printCodeBox(code string, ttlSecs int) {
 	fmt.Println("Waiting for the guest to connect...")
 }
 
+// sanitize strips ASCII control bytes and caps length, so a guest can't
+// smuggle ANSI escapes into the host's terminal prompt.
+func sanitize(s string) string {
+	const max = 200
+	var b strings.Builder
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			b.WriteByte('?')
+			continue
+		}
+		b.WriteRune(r)
+		if b.Len() >= max {
+			b.WriteString("...")
+			break
+		}
+	}
+	return b.String()
+}
+
 func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedName string, hostID, ca certs.Identity) {
 	cfg, err := certs.ClientTLS(hostID, ca, serverName)
 	check(err)
@@ -264,7 +283,7 @@ func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedNa
 			warn = "WARNING: name mismatch. "
 		}
 		fmt.Printf("\n%s%s (expected: %s) wants access to %s. Reason: %s. approve? [y/N] ",
-			warn, m.Who, expectedName, m.Target, m.Reason)
+			warn, sanitize(m.Who), sanitize(expectedName), sanitize(m.Target), sanitize(m.Reason))
 		line, err := in.ReadString('\n')
 		if err != nil {
 			return
