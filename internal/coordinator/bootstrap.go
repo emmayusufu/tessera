@@ -33,11 +33,10 @@ type bootstrapBundle struct {
 }
 
 type bootstrapStore struct {
-	mu       sync.Mutex
-	bundles  map[string]*bootstrapBundle
-	audit    *audit.Log
-	logger   *slog.Logger
-	janitorT *time.Ticker
+	mu      sync.Mutex
+	bundles map[string]*bootstrapBundle
+	audit   *audit.Log
+	logger  *slog.Logger
 }
 
 func newBootstrapStore(a *audit.Log, l *slog.Logger) *bootstrapStore {
