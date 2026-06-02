@@ -21,6 +21,8 @@ const (
 	KindApprovalSubscribe Kind = "approval_subscribe"
 	KindApprovalPrompt    Kind = "approval_prompt"
 	KindApprovalDecision  Kind = "approval_decision"
+	KindShareUpload       Kind = "share_upload"
+	KindShareResponse     Kind = "share_response"
 )
 
 type Msg struct {
@@ -38,6 +40,8 @@ type Msg struct {
 	SessionID string `json:"session_id,omitempty"`
 	ConnID    string `json:"conn_id,omitempty"`
 	Role      string `json:"role,omitempty"`
+
+	Code string `json:"code,omitempty"`
 }
 
 func WriteMsg(w io.Writer, m Msg) error {

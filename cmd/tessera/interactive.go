@@ -33,18 +33,12 @@ func shareInteractive(in *bufio.Reader) {
 		fmt.Fprintln(os.Stderr, "coordinator is required")
 		os.Exit(2)
 	}
-	base := prompt(in, "Coordinator base URL (http(s)://...)", "")
-	if base == "" {
-		fmt.Fprintln(os.Stderr, "coord-base-url is required")
-		os.Exit(2)
-	}
 	port := prompt(in, "Local port to share", "")
 	reason := prompt(in, "Reason shown to you", "")
 	expected := prompt(in, "Expected guest name", os.Getenv("USER"))
 
 	args := []string{
 		"-coordinator", coord,
-		"-coord-base-url", base,
 		"-reason", reason,
 		"-expected-name", expected,
 	}

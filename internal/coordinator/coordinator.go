@@ -116,6 +116,7 @@ type Coordinator struct {
 	sessions  map[string]*session
 	pending   map[string]chan net.Conn
 	approvers map[string][]*approverConn
+	sharePins map[string]string
 	rl        *rateLimiter
 	bootstrap *bootstrapStore
 }
@@ -131,6 +132,7 @@ func New(log *audit.Log, baseURL string, listen func() (net.Listener, error)) *C
 		sessions:  map[string]*session{},
 		pending:   map[string]chan net.Conn{},
 		approvers: map[string][]*approverConn{},
+		sharePins: map[string]string{},
 		rl:        newRateLimiter(),
 	}
 	c.bootstrap = newBootstrapStore(c.auditLog, c.logger)
@@ -157,6 +159,28 @@ func peerFingerprint(conn net.Conn) string {
 	}
 	sum := sha256.Sum256(certs[0].Raw)
 	return hex.EncodeToString(sum[:])
+}
+
+func hashFingerprint(fp string) string {
+	if fp == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(fp))
+	return hex.EncodeToString(sum[:])
+}
+
+// checkOrPinShare pins the share-id to fp on first use, or verifies a later
+// caller presents the same cert. Caller must hold c.mu.
+func (c *Coordinator) checkOrPinShare(shareID, fp string) bool {
+	if fp == "" || shareID == "" {
+		return false
+	}
+	pinned, ok := c.sharePins[shareID]
+	if !ok {
+		c.sharePins[shareID] = fp
+		return true
+	}
+	return pinned == fp
 }
 
 // Serve accepts agent and guest connections and serves the approval API on
@@ -224,14 +248,24 @@ func (c *Coordinator) handleConn(conn net.Conn) {
 	case proto.KindApprovalSubscribe:
 		defer conn.Close()
 		c.handleApprovalSubscribe(conn, m)
+	case proto.KindShareUpload:
+		defer conn.Close()
+		c.handleShareUpload(conn, m)
 	default:
 		conn.Close()
 	}
 }
 
 func (c *Coordinator) handleAgent(conn net.Conn, m proto.Msg) {
+	fp := peerFingerprint(conn)
 	ac := &agentConn{conn: conn}
 	c.mu.Lock()
+	if !c.checkOrPinShare(m.ShareID, fp) {
+		c.mu.Unlock()
+		_ = c.auditLog.Write(audit.Event{Kind: "register_denied", ShareID: m.ShareID, Token: hashFingerprint(fp), Detail: "share-id owned by a different cert"})
+		c.logger.Warn("agent register denied", "share_id", m.ShareID)
+		return
+	}
 	c.agents[m.ShareID] = ac
 	c.mu.Unlock()
 	c.logger.Info("agent registered", "share_id", m.ShareID)
@@ -402,12 +436,20 @@ func removeApprovers(in []*approverConn, drop []*approverConn) []*approverConn {
 }
 
 func (c *Coordinator) handleApprovalSubscribe(conn net.Conn, m proto.Msg) {
-	if peerFingerprint(conn) == "" {
+	fp := peerFingerprint(conn)
+	if fp == "" {
 		_ = proto.WriteMsg(conn, proto.Msg{Kind: proto.KindDecision, Detail: "client certificate required"})
 		return
 	}
 	ac := &approverConn{conn: conn}
 	c.mu.Lock()
+	if !c.checkOrPinShare(m.ShareID, fp) {
+		c.mu.Unlock()
+		_ = c.auditLog.Write(audit.Event{Kind: "subscribe_denied", ShareID: m.ShareID, Token: hashFingerprint(fp), Detail: "share-id owned by a different cert"})
+		c.logger.Warn("approver subscribe denied", "share_id", m.ShareID)
+		_ = proto.WriteMsg(conn, proto.Msg{Kind: proto.KindDecision, Detail: "share-id is owned by a different cert"})
+		return
+	}
 	c.approvers[m.ShareID] = append(c.approvers[m.ShareID], ac)
 	pending := make([]*request, 0)
 	for _, r := range c.requests {

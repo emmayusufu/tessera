@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"time"
 )
 
 func (c *Coordinator) httpMux() *http.ServeMux {
@@ -18,7 +17,6 @@ func (c *Coordinator) httpMux() *http.ServeMux {
 	mux.HandleFunc("POST /a/{id}/deny", c.handleDeny)
 	mux.HandleFunc("POST /s/{id}/revoke", c.handleRevoke)
 	mux.HandleFunc("POST /redeem/{code}", c.handleRedeem)
-	mux.HandleFunc("POST /share", c.handleShare)
 	return mux
 }
 
@@ -140,25 +138,6 @@ func (c *Coordinator) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	page(w, r, "Not found", "No such active session.")
 }
 
-type shareRequestBody struct {
-	CAcert       string `json:"ca_cert"`
-	GuestCert    string `json:"guest_cert"`
-	GuestKey     string `json:"guest_key"`
-	CoordAddr    string `json:"coord_addr"`
-	ServerName   string `json:"server_name"`
-	AgentName    string `json:"agent_name"`
-	ShareID      string `json:"share_id"`
-	Target       string `json:"target"`
-	ExpectedName string `json:"expected_name"`
-	Reason       string `json:"reason"`
-	TTLSeconds   int    `json:"ttl_seconds"`
-}
-
-type shareResponseBody struct {
-	Code      string `json:"code"`
-	ExpiresAt string `json:"expires_at"`
-}
-
 type redeemResponseBody struct {
 	CAcert       string `json:"ca_cert"`
 	GuestCert    string `json:"guest_cert"`
@@ -208,59 +187,6 @@ func (c *Coordinator) handleRedeem(w http.ResponseWriter, r *http.Request) {
 		Target:       b.Target,
 		ExpectedName: b.ExpectedName,
 		Reason:       b.Reason,
-	})
-}
-
-// handleShare uploads a bootstrap bundle and returns a short hyphenated code.
-// SECURITY: the :8080 HTTP server does not verify client certs, so this gates
-// on the operator bearer token. If TESSERA_OPERATOR_TOKEN is unset on the
-// coordinator, /share is disabled.
-func (c *Coordinator) handleShare(w http.ResponseWriter, r *http.Request) {
-	if c.operatorToken == "" {
-		http.Error(w, "share endpoint requires TESSERA_OPERATOR_TOKEN to be set on the coordinator", http.StatusServiceUnavailable)
-		return
-	}
-	if !c.rl.ipAllow(clientIP(r)) {
-		http.Error(w, "rate limited", http.StatusTooManyRequests)
-		return
-	}
-	if !c.operatorOK(r) {
-		http.Error(w, "operator authentication required", http.StatusForbidden)
-		return
-	}
-	var req shareRequestBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		http.Error(w, "bad json", http.StatusBadRequest)
-		return
-	}
-	ttl := req.TTLSeconds
-	if ttl < 10 {
-		ttl = 10
-	}
-	if ttl > 600 {
-		ttl = 600
-	}
-	b := &bootstrapBundle{
-		CAcert:       req.CAcert,
-		GuestCert:    req.GuestCert,
-		GuestKey:     req.GuestKey,
-		CoordAddr:    req.CoordAddr,
-		ServerName:   req.ServerName,
-		AgentName:    req.AgentName,
-		ShareID:      req.ShareID,
-		Target:       req.Target,
-		ExpectedName: req.ExpectedName,
-		Reason:       req.Reason,
-	}
-	code, _, expires, err := c.bootstrap.Put(b, time.Duration(ttl)*time.Second)
-	if err != nil {
-		http.Error(w, "could not mint code", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(shareResponseBody{
-		Code:      code,
-		ExpiresAt: expires.UTC().Format(time.RFC3339),
 	})
 }
 

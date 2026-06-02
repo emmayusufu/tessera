@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -13,7 +12,6 @@ import (
 	"log/slog"
 	"math/big"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -41,11 +39,6 @@ type shareRequest struct {
 	TTLSeconds   int    `json:"ttl_seconds"`
 }
 
-type shareResponse struct {
-	Code      string `json:"code"`
-	ExpiresAt string `json:"expires_at"`
-}
-
 func cmdShare(args []string) {
 	fs := flag.NewFlagSet("share", flag.ExitOnError)
 	port := fs.Int("port", 0, "local port to forward; sets target to 127.0.0.1:<port>")
@@ -54,9 +47,7 @@ func cmdShare(args []string) {
 	expectedName := fs.String("expected-name", os.Getenv("USER"), "the name you expect the guest to be")
 	coordAddr := fs.String("coordinator", "", "coordinator mTLS address host:port (required)")
 	serverName := fs.String("server-name", "", "coordinator certificate name (defaults to host part of -coordinator)")
-	coordBase := fs.String("coord-base-url", "", "HTTP(S) base URL for /share + /redeem (required)")
 	configDir := fs.String("config-dir", "", "config directory (defaults to $XDG_CONFIG_HOME/tessera)")
-	operatorToken := fs.String("operator-token", "", "operator token for /share (falls back to TESSERA_OPERATOR_TOKEN, then <config-dir>/operator-token)")
 	ttl := fs.Duration("ttl", 90*time.Second, "share code TTL")
 	_ = fs.Parse(args)
 
@@ -64,18 +55,13 @@ func cmdShare(args []string) {
 	if dir == "" {
 		dir = defaultConfigDir()
 	}
-	if *coordAddr == "" || *coordBase == "" {
+	if *coordAddr == "" {
 		if c, _ := loadCoordinator(dir); c != nil {
-			if *coordAddr == "" {
-				*coordAddr = c.MtlsAddr
-			}
-			if *coordBase == "" {
-				*coordBase = c.BaseURL
-			}
+			*coordAddr = c.MtlsAddr
 		}
 	}
-	if *coordAddr == "" || *coordBase == "" {
-		fmt.Fprintln(os.Stderr, "share: -coordinator and -coord-base-url are required (run `tessera link` once to save them)")
+	if *coordAddr == "" {
+		fmt.Fprintln(os.Stderr, "share: -coordinator is required (run `tessera link` once to save it)")
 		os.Exit(2)
 	}
 	resolvedTarget := *target
@@ -114,7 +100,9 @@ func cmdShare(args []string) {
 	guestID, err := certs.Issue(caID, guestName, guestName)
 	check(err)
 
-	outer, err := certs.ClientTLS(agentID, ca, name)
+	// The host's own cert anchors both the agent registration and the share
+	// upload so the coordinator can pin the share-id to a single identity.
+	outer, err := certs.ClientTLS(hostID, ca, name)
 	check(err)
 	inner, err := certs.ServerTLS(agentID, ca)
 	check(err)
@@ -139,7 +127,6 @@ func cmdShare(args []string) {
 			}
 		}
 	}()
-	time.Sleep(500 * time.Millisecond)
 
 	ttlSecs := int(ttl.Seconds())
 	if ttlSecs < 10 {
@@ -164,36 +151,64 @@ func cmdShare(args []string) {
 	})
 	check(err)
 
-	httpTLS, err := certs.ClientTLS(hostID, ca, name)
-	check(err)
-	client := &http.Client{
-		Timeout:   15 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: httpTLS},
-	}
-	opToken, err := resolveOperatorToken(*operatorToken, dir)
+	code, err := uploadShare(ctx, *coordAddr, outer, string(body))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	shareURL := strings.TrimRight(*coordBase, "/") + "/share"
-	httpReq, err := http.NewRequest(http.MethodPost, shareURL, bytes.NewReader(body))
-	check(err)
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+opToken)
-	resp, err := client.Do(httpReq)
-	check(err)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(resp.Body)
-		fmt.Fprintf(os.Stderr, "share upload failed: %s: %s\n", resp.Status, strings.TrimSpace(string(errBody)))
-		os.Exit(1)
-	}
-	var sr shareResponse
-	check(json.NewDecoder(resp.Body).Decode(&sr))
 
-	printCodeBox(sr.Code, ttlSecs)
+	printCodeBox(code, ttlSecs)
 
 	approveLoop(ctx, *coordAddr, name, shareID, *expectedName, hostID, ca)
+}
+
+// uploadShare opens a fresh mTLS connection to the coordinator and sends one
+// KindShareUpload frame, retrying briefly so the share-id pin lands on the same
+// cert as the agent's registration (which races on a separate goroutine).
+func uploadShare(ctx context.Context, coordAddr string, outer *tls.Config, body string) (string, error) {
+	deadline := time.Now().Add(10 * time.Second)
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		code, err := uploadShareOnce(coordAddr, outer, body)
+		if err == nil {
+			return code, nil
+		}
+		lastErr = err
+		if time.Now().After(deadline) || attempt > 20 {
+			return "", fmt.Errorf("share upload failed: %w", lastErr)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
+func uploadShareOnce(coordAddr string, outer *tls.Config, body string) (string, error) {
+	conn, err := tls.Dial("tcp", coordAddr, outer)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+
+	if err := proto.WriteMsg(conn, proto.Msg{Kind: proto.KindShareUpload, Detail: body}); err != nil {
+		return "", err
+	}
+	resp, err := proto.ReadMsg(conn)
+	if err != nil {
+		return "", err
+	}
+	if resp.Kind != proto.KindShareResponse {
+		return "", fmt.Errorf("unexpected response kind %q", resp.Kind)
+	}
+	if resp.Detail != "" {
+		return "", fmt.Errorf("%s", resp.Detail)
+	}
+	if resp.Code == "" {
+		return "", fmt.Errorf("empty share code")
+	}
+	return resp.Code, nil
 }
 
 func printCodeBox(code string, ttlSecs int) {
@@ -264,20 +279,6 @@ func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedNa
 			return
 		}
 	}
-}
-
-func resolveOperatorToken(flagVal, configDir string) (string, error) {
-	if flagVal != "" {
-		return flagVal, nil
-	}
-	if t := strings.TrimSpace(os.Getenv("TESSERA_OPERATOR_TOKEN")); t != "" {
-		return t, nil
-	}
-	p := filepath.Join(configDir, "operator-token")
-	if b, err := os.ReadFile(p); err == nil {
-		return strings.TrimSpace(string(b)), nil
-	}
-	return "", fmt.Errorf("operator token required. Provide one of: -operator-token <hex>, TESSERA_OPERATOR_TOKEN env, or write the token to %s (mode 0600 recommended)", p)
 }
 
 const tagAlphabet = "23456789abcdefghjkmnpqrstvwxyz"
