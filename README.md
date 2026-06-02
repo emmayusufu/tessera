@@ -92,7 +92,7 @@ sequenceDiagram
     G->>K: open stream (session)
     K->>A: open data (target)
     A->>R: dial target
-    Note over G,A: inner TLS end to end; the coordinator relays only ciphertext
+    Note over G,A: inner TLS end to end. Coordinator sees only ciphertext.
     G->>R: tunneled traffic
 ```
 
