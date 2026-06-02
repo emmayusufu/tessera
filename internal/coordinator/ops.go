@@ -1,8 +1,6 @@
 package coordinator
 
 import (
-	"time"
-
 	"github.com/emmayusufu/tessera/internal/audit"
 )
 
@@ -12,14 +10,6 @@ type RequestView struct {
 	Who     string
 	Target  string
 	Reason  string
-}
-
-type Stats struct {
-	ActiveSessions  int
-	PendingRequests int
-	AgentsOnline    int
-	ApprovalsP50    time.Duration
-	ApprovalsP99    time.Duration
 }
 
 func (c *Coordinator) Online(shareID string) bool {
@@ -37,18 +27,6 @@ func (c *Coordinator) PendingRequests() []RequestView {
 		out = append(out, RequestView{ID: r.id, ShareID: r.shareID, Who: r.who, Target: r.target, Reason: r.reason})
 	}
 	return out
-}
-
-func (c *Coordinator) Stats() Stats {
-	c.mu.Lock()
-	s := Stats{
-		ActiveSessions:  len(c.sessions),
-		PendingRequests: len(c.requests),
-		AgentsOnline:    len(c.agents),
-	}
-	c.mu.Unlock()
-	s.ApprovalsP50, s.ApprovalsP99 = c.latencies.percentiles()
-	return s
 }
 
 // Restore is a stub; replaying pending requests requires reading the audit file

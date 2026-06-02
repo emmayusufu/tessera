@@ -19,7 +19,6 @@ func (c *Coordinator) httpMux() *http.ServeMux {
 	mux.HandleFunc("POST /s/{id}/revoke", c.handleRevoke)
 	mux.HandleFunc("POST /redeem/{code}", c.handleRedeem)
 	mux.HandleFunc("POST /share", c.handleShare)
-	mux.HandleFunc("GET /metrics", c.handleMetrics)
 	return mux
 }
 
@@ -139,15 +138,6 @@ func (c *Coordinator) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page(w, r, "Not found", "No such active session.")
-}
-
-func (c *Coordinator) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	if !c.operatorOK(r) {
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(c.Stats())
 }
 
 type shareRequestBody struct {

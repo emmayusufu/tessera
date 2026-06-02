@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"sort"
 	"sync"
 	"time"
 
@@ -44,44 +43,6 @@ func (a *approverConn) send(m proto.Msg) error {
 	a.wmu.Lock()
 	defer a.wmu.Unlock()
 	return proto.WriteMsg(a.conn, m)
-}
-
-type ringBuf struct {
-	mu   sync.Mutex
-	data [100]time.Duration
-	n    int
-	full bool
-}
-
-func (r *ringBuf) record(d time.Duration) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.data[r.n] = d
-	r.n++
-	if r.n >= len(r.data) {
-		r.n = 0
-		r.full = true
-	}
-}
-
-func (r *ringBuf) percentiles() (p50, p99 time.Duration) {
-	r.mu.Lock()
-	count := r.n
-	if r.full {
-		count = len(r.data)
-	}
-	if count == 0 {
-		r.mu.Unlock()
-		return 0, 0
-	}
-	buf := make([]time.Duration, count)
-	copy(buf, r.data[:count])
-	r.mu.Unlock()
-
-	sort.Slice(buf, func(i, j int) bool { return buf[i] < buf[j] })
-	idx50 := (count - 1) * 50 / 100
-	idx99 := (count - 1) * 99 / 100
-	return buf[idx50], buf[idx99]
 }
 
 type decision struct {
@@ -155,7 +116,6 @@ type Coordinator struct {
 	sessions  map[string]*session
 	pending   map[string]chan net.Conn
 	approvers map[string][]*approverConn
-	latencies *ringBuf
 	rl        *rateLimiter
 	bootstrap *bootstrapStore
 }
@@ -171,7 +131,6 @@ func New(log *audit.Log, baseURL string, listen func() (net.Listener, error)) *C
 		sessions:  map[string]*session{},
 		pending:   map[string]chan net.Conn{},
 		approvers: map[string][]*approverConn{},
-		latencies: &ringBuf{},
 		rl:        newRateLimiter(),
 	}
 	c.bootstrap = newBootstrapStore(c.auditLog, c.logger)
@@ -518,7 +477,6 @@ func (c *Coordinator) resolve(requestID string, d decision) bool {
 		kind = "approve"
 	}
 	_ = c.auditLog.Write(audit.Event{Kind: kind, RequestID: requestID, ShareID: req.shareID, Who: req.who, Target: req.target, Detail: d.detail})
-	c.latencies.record(time.Since(req.created))
 	select {
 	case req.decided <- d:
 		return true

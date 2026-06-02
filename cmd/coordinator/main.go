@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -53,21 +52,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var hmacKey []byte
-	if hmacHex := os.Getenv("TESSERA_AUDIT_HMAC_KEY"); hmacHex != "" {
-		hmacKey, err = hex.DecodeString(hmacHex)
-		if err != nil {
-			log.Error("invalid TESSERA_AUDIT_HMAC_KEY: must be hex", "err", err)
-			os.Exit(2)
-		}
-	}
-
-	var auditLog *audit.Log
-	if hmacKey != nil {
-		auditLog, err = audit.OpenWithHMAC(*auditFile, hmacKey)
-	} else {
-		auditLog, err = audit.Open(*auditFile)
-	}
+	auditLog, err := audit.Open(*auditFile)
 	if err != nil {
 		if errors.Is(err, fs.ErrPermission) {
 			log.Error(fmt.Sprintf("audit log path %s is not writable; pass --audit /path/you/own", *auditFile), "err", err)
@@ -77,9 +62,6 @@ func main() {
 		os.Exit(1)
 	}
 	defer auditLog.Close()
-	if hmacKey != nil {
-		log.Info("audit log HMAC chain enabled")
-	}
 
 	listen := func() (net.Listener, error) { return tls.Listen("tcp", *listenAddr, tlsConf) }
 	coord := coordinator.New(auditLog, *baseURL, listen)
