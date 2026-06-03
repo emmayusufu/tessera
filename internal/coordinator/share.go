@@ -12,17 +12,18 @@ import (
 // shareUploadRequest is the JSON body the host sends inside a KindShareUpload
 // frame. It mirrors the redeem response so the guest sees a matching bundle.
 type shareUploadRequest struct {
-	CAcert       string `json:"ca_cert"`
-	GuestCert    string `json:"guest_cert"`
-	GuestKey     string `json:"guest_key"`
-	CoordAddr    string `json:"coord_addr"`
-	ServerName   string `json:"server_name"`
-	AgentName    string `json:"agent_name"`
-	ShareID      string `json:"share_id"`
-	Target       string `json:"target"`
-	ExpectedName string `json:"expected_name"`
-	Reason       string `json:"reason"`
-	TTLSeconds   int    `json:"ttl_seconds"`
+	CAcert             string `json:"ca_cert"`
+	GuestCert          string `json:"guest_cert"`
+	GuestKey           string `json:"guest_key"`
+	CoordAddr          string `json:"coord_addr"`
+	ServerName         string `json:"server_name"`
+	AgentName          string `json:"agent_name"`
+	ShareID            string `json:"share_id"`
+	Target             string `json:"target"`
+	ExpectedName       string `json:"expected_name"`
+	Reason             string `json:"reason"`
+	TTLSeconds         int    `json:"ttl_seconds"`
+	IdleTimeoutSeconds int    `json:"idle_timeout_seconds"`
 }
 
 func (c *Coordinator) handleShareUpload(conn net.Conn, m proto.Msg) {
@@ -59,22 +60,39 @@ func (c *Coordinator) handleShareUpload(conn net.Conn, m proto.Msg) {
 		ttl = 600
 	}
 
+	idle := req.IdleTimeoutSeconds
+	if idle == 0 {
+		idle = int(defaultIdleTimeout / time.Second)
+	}
+	if idle < 60 {
+		idle = 60
+	}
+	if idle > 86400 {
+		idle = 86400
+	}
+
 	b := &bootstrapBundle{
-		CAcert:       req.CAcert,
-		GuestCert:    req.GuestCert,
-		GuestKey:     req.GuestKey,
-		CoordAddr:    req.CoordAddr,
-		ServerName:   req.ServerName,
-		AgentName:    req.AgentName,
-		ShareID:      req.ShareID,
-		Target:       req.Target,
-		ExpectedName: req.ExpectedName,
-		Reason:       req.Reason,
+		CAcert:             req.CAcert,
+		GuestCert:          req.GuestCert,
+		GuestKey:           req.GuestKey,
+		CoordAddr:          req.CoordAddr,
+		ServerName:         req.ServerName,
+		AgentName:          req.AgentName,
+		ShareID:            req.ShareID,
+		Target:             req.Target,
+		ExpectedName:       req.ExpectedName,
+		Reason:             req.Reason,
+		IdleTimeoutSeconds: idle,
 	}
 	code, _, _, err := c.bootstrap.Put(b, time.Duration(ttl)*time.Second)
 	if err != nil {
 		_ = proto.WriteMsg(conn, proto.Msg{Kind: proto.KindShareResponse, Detail: "could not mint code"})
 		return
 	}
+
+	c.mu.Lock()
+	c.sessionTimeouts[req.ShareID] = time.Duration(idle) * time.Second
+	c.mu.Unlock()
+
 	_ = proto.WriteMsg(conn, proto.Msg{Kind: proto.KindShareResponse, Code: code})
 }

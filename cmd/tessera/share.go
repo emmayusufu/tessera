@@ -26,17 +26,18 @@ import (
 )
 
 type shareRequest struct {
-	CAcert       string `json:"ca_cert"`
-	GuestCert    string `json:"guest_cert"`
-	GuestKey     string `json:"guest_key"`
-	CoordAddr    string `json:"coord_addr"`
-	ServerName   string `json:"server_name"`
-	AgentName    string `json:"agent_name"`
-	ShareID      string `json:"share_id"`
-	Target       string `json:"target"`
-	ExpectedName string `json:"expected_name"`
-	Reason       string `json:"reason"`
-	TTLSeconds   int    `json:"ttl_seconds"`
+	CAcert             string `json:"ca_cert"`
+	GuestCert          string `json:"guest_cert"`
+	GuestKey           string `json:"guest_key"`
+	CoordAddr          string `json:"coord_addr"`
+	ServerName         string `json:"server_name"`
+	AgentName          string `json:"agent_name"`
+	ShareID            string `json:"share_id"`
+	Target             string `json:"target"`
+	ExpectedName       string `json:"expected_name"`
+	Reason             string `json:"reason"`
+	TTLSeconds         int    `json:"ttl_seconds"`
+	IdleTimeoutSeconds int    `json:"idle_timeout_seconds"`
 }
 
 func cmdShare(args []string) {
@@ -50,6 +51,7 @@ func cmdShare(args []string) {
 	configDir := fs.String("config-dir", "", "config directory (defaults to $XDG_CONFIG_HOME/tessera)")
 	ttl := fs.Duration("ttl", 90*time.Second, "share code TTL")
 	maxDuration := fs.Duration("max-duration", 0, "kill the share session after this wall-clock duration regardless of activity (0 disables)")
+	idleTimeout := fs.Duration("idle-timeout", 30*time.Minute, "close a stream after this much idle time (clamped to [1m, 24h] by the coordinator)")
 	_ = fs.Parse(args)
 
 	dir := *configDir
@@ -138,17 +140,18 @@ func cmdShare(args []string) {
 	}
 
 	body, err := json.Marshal(shareRequest{
-		CAcert:       string(ca.Cert),
-		GuestCert:    string(guestID.Cert),
-		GuestKey:     string(guestID.Key),
-		CoordAddr:    *coordAddr,
-		ServerName:   name,
-		AgentName:    agentName,
-		ShareID:      shareID,
-		Target:       resolvedTarget,
-		ExpectedName: *expectedName,
-		Reason:       *reason,
-		TTLSeconds:   ttlSecs,
+		CAcert:             string(ca.Cert),
+		GuestCert:          string(guestID.Cert),
+		GuestKey:           string(guestID.Key),
+		CoordAddr:          *coordAddr,
+		ServerName:         name,
+		AgentName:          agentName,
+		ShareID:            shareID,
+		Target:             resolvedTarget,
+		ExpectedName:       *expectedName,
+		Reason:             *reason,
+		TTLSeconds:         ttlSecs,
+		IdleTimeoutSeconds: int(idleTimeout.Seconds()),
 	})
 	check(err)
 

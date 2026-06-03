@@ -17,16 +17,17 @@ import (
 const bootstrapAlphabet = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 type bootstrapBundle struct {
-	CAcert       string
-	GuestCert    string
-	GuestKey     string
-	CoordAddr    string
-	ServerName   string
-	AgentName    string
-	ShareID      string
-	Target       string
-	ExpectedName string
-	Reason       string
+	CAcert             string
+	GuestCert          string
+	GuestKey           string
+	CoordAddr          string
+	ServerName         string
+	AgentName          string
+	ShareID            string
+	Target             string
+	ExpectedName       string
+	Reason             string
+	IdleTimeoutSeconds int
 
 	expiresAt time.Time
 	consumed  bool

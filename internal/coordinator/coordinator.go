@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	idleTimeout = 30 * time.Minute
-	pairTimeout = 15 * time.Second
+	defaultIdleTimeout = 30 * time.Minute
+	pairTimeout        = 15 * time.Second
 )
 
 type agentConn struct {
@@ -63,12 +63,13 @@ type request struct {
 }
 
 type session struct {
-	id      string
-	shareID string
-	target  string
-	who     string
-	guest   string
-	ctl     net.Conn
+	id          string
+	shareID     string
+	target      string
+	who         string
+	guest       string
+	ctl         net.Conn
+	idleTimeout time.Duration
 
 	smu     sync.Mutex
 	streams map[net.Conn]struct{}
@@ -110,30 +111,32 @@ type Coordinator struct {
 	listen        func() (net.Listener, error)
 	operatorToken string
 
-	mu        sync.Mutex
-	agents    map[string]*agentConn
-	requests  map[string]*request
-	sessions  map[string]*session
-	pending   map[string]chan net.Conn
-	approvers map[string][]*approverConn
-	sharePins map[string]string
-	rl        *rateLimiter
-	bootstrap *bootstrapStore
+	mu              sync.Mutex
+	agents          map[string]*agentConn
+	requests        map[string]*request
+	sessions        map[string]*session
+	pending         map[string]chan net.Conn
+	approvers       map[string][]*approverConn
+	sharePins       map[string]string
+	sessionTimeouts map[string]time.Duration
+	rl              *rateLimiter
+	bootstrap       *bootstrapStore
 }
 
 func New(log *audit.Log, baseURL string, listen func() (net.Listener, error)) *Coordinator {
 	c := &Coordinator{
-		auditLog:  log,
-		logger:    slog.Default(),
-		baseURL:   baseURL,
-		listen:    listen,
-		agents:    map[string]*agentConn{},
-		requests:  map[string]*request{},
-		sessions:  map[string]*session{},
-		pending:   map[string]chan net.Conn{},
-		approvers: map[string][]*approverConn{},
-		sharePins: map[string]string{},
-		rl:        newRateLimiter(),
+		auditLog:        log,
+		logger:          slog.Default(),
+		baseURL:         baseURL,
+		listen:          listen,
+		agents:          map[string]*agentConn{},
+		requests:        map[string]*request{},
+		sessions:        map[string]*session{},
+		pending:         map[string]chan net.Conn{},
+		approvers:       map[string][]*approverConn{},
+		sharePins:       map[string]string{},
+		sessionTimeouts: map[string]time.Duration{},
+		rl:              newRateLimiter(),
 	}
 	c.bootstrap = newBootstrapStore(c.auditLog, c.logger)
 	return c
@@ -335,14 +338,22 @@ func (c *Coordinator) handleRequest(conn net.Conn, m proto.Msg) {
 		return
 	}
 
+	c.mu.Lock()
+	idle, ok := c.sessionTimeouts[req.shareID]
+	c.mu.Unlock()
+	if !ok {
+		idle = defaultIdleTimeout
+	}
+
 	sess := &session{
-		id:      newID(),
-		shareID: req.shareID,
-		target:  req.target,
-		who:     req.who,
-		guest:   req.peer,
-		ctl:     conn,
-		streams: map[net.Conn]struct{}{},
+		id:          newID(),
+		shareID:     req.shareID,
+		target:      req.target,
+		who:         req.who,
+		guest:       req.peer,
+		ctl:         conn,
+		idleTimeout: idle,
+		streams:     map[net.Conn]struct{}{},
 	}
 	c.mu.Lock()
 	c.sessions[sess.id] = sess

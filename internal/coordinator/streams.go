@@ -49,7 +49,7 @@ func (c *Coordinator) handleGuestData(conn net.Conn, m proto.Msg) {
 			agentSide.Close()
 			return
 		}
-		netutil.PipeIdle(conn, agentSide, idleTimeout)
+		netutil.PipeIdle(conn, agentSide, sess.idleTimeout)
 		sess.removeStream(conn)
 	case <-time.After(pairTimeout):
 		c.mu.Lock()
