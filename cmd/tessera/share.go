@@ -159,7 +159,7 @@ func cmdShare(args []string) {
 
 	printCodeBox(code, ttlSecs)
 
-	approveLoop(ctx, *coordAddr, name, shareID, *expectedName, hostID, ca)
+	approveLoop(ctx, *coordAddr, name, shareID, *expectedName, hostID, ca, time.Duration(ttlSecs)*time.Second)
 }
 
 // uploadShare opens a fresh mTLS connection to the coordinator and sends one
@@ -247,7 +247,7 @@ func sanitize(s string) string {
 	return b.String()
 }
 
-func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedName string, hostID, ca certs.Identity) {
+func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedName string, hostID, ca certs.Identity, ttl time.Duration) {
 	cfg, err := certs.ClientTLS(hostID, ca, serverName)
 	check(err)
 
@@ -276,26 +276,50 @@ func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedNa
 		}
 	}()
 
+	timer := time.NewTimer(ttl)
+	defer timer.Stop()
+	var firstSeen bool
+
 	in := bufio.NewReader(os.Stdin)
-	for m := range prompts {
-		warn := ""
-		if !strings.EqualFold(strings.TrimSpace(m.Who), strings.TrimSpace(expectedName)) {
-			warn = "WARNING: name mismatch. "
-		}
-		fmt.Printf("\n%s%s (expected: %s) wants access to %s. Reason: %s. approve? [y/N] ",
-			warn, sanitize(m.Who), sanitize(expectedName), sanitize(m.Target), sanitize(m.Reason))
-		line, err := in.ReadString('\n')
-		if err != nil {
-			return
-		}
-		approved := strings.EqualFold(strings.TrimSpace(line), "y")
-		out := proto.Msg{Kind: proto.KindApprovalDecision, RequestID: m.RequestID, Approved: approved}
-		if !approved {
-			out.Detail = "denied by host"
-		}
-		if err := proto.WriteMsg(conn, out); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
+	for {
+		select {
+		case m, ok := <-prompts:
+			if !ok {
+				return
+			}
+			if !firstSeen {
+				firstSeen = true
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			}
+			warn := ""
+			if !strings.EqualFold(strings.TrimSpace(m.Who), strings.TrimSpace(expectedName)) {
+				warn = "WARNING: name mismatch. "
+			}
+			fmt.Printf("\n%s%s (expected: %s) wants access to %s. Reason: %s. approve? [y/N] ",
+				warn, sanitize(m.Who), sanitize(expectedName), sanitize(m.Target), sanitize(m.Reason))
+			line, err := in.ReadString('\n')
+			if err != nil {
+				return
+			}
+			approved := strings.EqualFold(strings.TrimSpace(line), "y")
+			out := proto.Msg{Kind: proto.KindApprovalDecision, RequestID: m.RequestID, Approved: approved}
+			if !approved {
+				out.Detail = "denied by host"
+			}
+			if err := proto.WriteMsg(conn, out); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+		case <-timer.C:
+			if !firstSeen {
+				fmt.Fprintf(os.Stderr, "share code expired; no guest joined within %ds\n", int(ttl.Seconds()))
+				return
+			}
 		}
 	}
 }
