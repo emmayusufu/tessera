@@ -23,6 +23,7 @@ const (
 	KindApprovalDecision  Kind = "approval_decision"
 	KindShareUpload       Kind = "share_upload"
 	KindShareResponse     Kind = "share_response"
+	KindSessionEnded      Kind = "session_ended"
 )
 
 type Msg struct {

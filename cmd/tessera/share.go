@@ -49,6 +49,7 @@ func cmdShare(args []string) {
 	serverName := fs.String("server-name", "", "coordinator certificate name (defaults to host part of -coordinator)")
 	configDir := fs.String("config-dir", "", "config directory (defaults to $XDG_CONFIG_HOME/tessera)")
 	ttl := fs.Duration("ttl", 90*time.Second, "share code TTL")
+	maxDuration := fs.Duration("max-duration", 0, "kill the share session after this wall-clock duration regardless of activity (0 disables)")
 	_ = fs.Parse(args)
 
 	dir := *configDir
@@ -159,7 +160,7 @@ func cmdShare(args []string) {
 
 	printCodeBox(code, ttlSecs)
 
-	approveLoop(ctx, *coordAddr, name, shareID, *expectedName, hostID, ca, time.Duration(ttlSecs)*time.Second)
+	approveLoop(ctx, *coordAddr, name, shareID, *expectedName, hostID, ca, time.Duration(ttlSecs)*time.Second, *maxDuration)
 }
 
 // uploadShare opens a fresh mTLS connection to the coordinator and sends one
@@ -247,7 +248,7 @@ func sanitize(s string) string {
 	return b.String()
 }
 
-func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedName string, hostID, ca certs.Identity, ttl time.Duration) {
+func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedName string, hostID, ca certs.Identity, ttl, maxDuration time.Duration) {
 	cfg, err := certs.ClientTLS(hostID, ca, serverName)
 	check(err)
 
@@ -262,64 +263,84 @@ func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedNa
 		conn.Close()
 	}()
 
-	prompts := make(chan proto.Msg, 16)
+	msgs := make(chan proto.Msg, 16)
 	go func() {
-		defer close(prompts)
+		defer close(msgs)
 		for {
 			m, err := proto.ReadMsg(conn)
 			if err != nil {
 				return
 			}
-			if m.Kind == proto.KindApprovalPrompt {
-				prompts <- m
+			switch m.Kind {
+			case proto.KindApprovalPrompt, proto.KindSessionEnded:
+				msgs <- m
 			}
 		}
 	}()
 
 	timer := time.NewTimer(ttl)
 	defer timer.Stop()
+
+	var maxC <-chan time.Time
+	if maxDuration > 0 {
+		maxT := time.NewTimer(maxDuration)
+		defer maxT.Stop()
+		maxC = maxT.C
+	}
+
 	var firstSeen bool
 
 	in := bufio.NewReader(os.Stdin)
 	for {
 		select {
-		case m, ok := <-prompts:
+		case m, ok := <-msgs:
 			if !ok {
 				return
 			}
-			if !firstSeen {
-				firstSeen = true
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
+			switch m.Kind {
+			case proto.KindApprovalPrompt:
+				if !firstSeen {
+					firstSeen = true
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
 					}
 				}
-			}
-			warn := ""
-			if !strings.EqualFold(strings.TrimSpace(m.Who), strings.TrimSpace(expectedName)) {
-				warn = "WARNING: name mismatch. "
-			}
-			fmt.Printf("\n%s%s (expected: %s) wants access to %s. Reason: %s. approve? [y/N] ",
-				warn, sanitize(m.Who), sanitize(expectedName), sanitize(m.Target), sanitize(m.Reason))
-			line, err := in.ReadString('\n')
-			if err != nil {
-				return
-			}
-			approved := strings.EqualFold(strings.TrimSpace(line), "y")
-			out := proto.Msg{Kind: proto.KindApprovalDecision, RequestID: m.RequestID, Approved: approved}
-			if !approved {
-				out.Detail = "denied by host"
-			}
-			if err := proto.WriteMsg(conn, out); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
+				warn := ""
+				if !strings.EqualFold(strings.TrimSpace(m.Who), strings.TrimSpace(expectedName)) {
+					warn = "WARNING: name mismatch. "
+				}
+				fmt.Printf("\n%s%s (expected: %s) wants access to %s. Reason: %s. approve? [y/N] ",
+					warn, sanitize(m.Who), sanitize(expectedName), sanitize(m.Target), sanitize(m.Reason))
+				line, err := in.ReadString('\n')
+				if err != nil {
+					return
+				}
+				approved := strings.EqualFold(strings.TrimSpace(line), "y")
+				out := proto.Msg{Kind: proto.KindApprovalDecision, RequestID: m.RequestID, Approved: approved}
+				if !approved {
+					out.Detail = "denied by host"
+				}
+				if err := proto.WriteMsg(conn, out); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					return
+				}
+			case proto.KindSessionEnded:
+				if firstSeen {
+					fmt.Fprintln(os.Stderr, "session ended; tessera share exiting")
+					return
+				}
 			}
 		case <-timer.C:
 			if !firstSeen {
 				fmt.Fprintf(os.Stderr, "share code expired; no guest joined within %ds\n", int(ttl.Seconds()))
 				return
 			}
+		case <-maxC:
+			fmt.Fprintln(os.Stderr, "max duration reached; tessera share exiting")
+			return
 		}
 	}
 }

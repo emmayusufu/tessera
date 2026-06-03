@@ -366,18 +366,24 @@ func (c *Coordinator) handleRequest(conn net.Conn, m proto.Msg) {
 func (c *Coordinator) endSession(sessionID, reason string) {
 	c.mu.Lock()
 	sess, ok := c.sessions[sessionID]
-	if ok {
-		delete(c.sessions, sessionID)
-	}
-	c.mu.Unlock()
 	if !ok {
+		c.mu.Unlock()
 		return
 	}
+	delete(c.sessions, sessionID)
+	subs := append([]*approverConn(nil), c.approvers[sess.shareID]...)
+	c.mu.Unlock()
+
 	for _, conn := range sess.end() {
 		conn.Close()
 	}
 	_ = c.auditLog.Write(audit.Event{Kind: "session_close", SessionID: sess.id, ShareID: sess.shareID, Who: sess.who, Target: sess.target, Detail: reason})
 	c.logger.Info("session closed", "session", sess.id, "reason", reason)
+
+	notice := proto.Msg{Kind: proto.KindSessionEnded, SessionID: sess.id, ShareID: sess.shareID}
+	for _, a := range subs {
+		_ = a.send(notice)
+	}
 }
 
 func (c *Coordinator) Approve(requestID string) bool {
