@@ -36,8 +36,38 @@ type shareRequest struct {
 	Target             string `json:"target"`
 	ExpectedName       string `json:"expected_name"`
 	Reason             string `json:"reason"`
+	ExecHint           string `json:"exec_hint"`
 	TTLSeconds         int    `json:"ttl_seconds"`
 	IdleTimeoutSeconds int    `json:"idle_timeout_seconds"`
+}
+
+// deriveExecHint guesses a sensible guest-side command from a host:port target
+// so the guest does not have to remember the protocol. The returned string may
+// contain "{port}" which the guest substitutes with its local forwarded port.
+func deriveExecHint(target string) string {
+	_, p, err := net.SplitHostPort(target)
+	if err != nil {
+		return ""
+	}
+	switch p {
+	case "22":
+		user := os.Getenv("USER")
+		if user == "" {
+			user = "root"
+		}
+		return "ssh " + user + "@127.0.0.1 -p {port}"
+	case "5432":
+		return "psql -h 127.0.0.1 -p {port}"
+	case "3306":
+		return "mysql -h 127.0.0.1 -P {port} -u root"
+	case "6379":
+		return "redis-cli -p {port}"
+	case "27017":
+		return "mongosh mongodb://127.0.0.1:{port}"
+	case "80", "443", "3000", "8000", "8080":
+		return "open http://127.0.0.1:{port}"
+	}
+	return ""
 }
 
 func cmdShare(args []string) {
@@ -52,6 +82,7 @@ func cmdShare(args []string) {
 	ttl := fs.Duration("ttl", 90*time.Second, "share code TTL")
 	maxDuration := fs.Duration("max-duration", 0, "kill the share session after this wall-clock duration regardless of activity (0 disables)")
 	idleTimeout := fs.Duration("idle-timeout", 30*time.Minute, "close a stream after this much idle time (clamped to [1m, 24h] by the coordinator)")
+	execHint := fs.String("exec-hint", "", "command the guest should run after connecting; {port} is replaced with the guest's local port. If empty, derived from the target port.")
 	_ = fs.Parse(args)
 
 	dir := *configDir
@@ -139,6 +170,11 @@ func cmdShare(args []string) {
 		ttlSecs = 600
 	}
 
+	resolvedHint := *execHint
+	if resolvedHint == "" {
+		resolvedHint = deriveExecHint(resolvedTarget)
+	}
+
 	body, err := json.Marshal(shareRequest{
 		CAcert:             string(ca.Cert),
 		GuestCert:          string(guestID.Cert),
@@ -150,6 +186,7 @@ func cmdShare(args []string) {
 		Target:             resolvedTarget,
 		ExpectedName:       *expectedName,
 		Reason:             *reason,
+		ExecHint:           resolvedHint,
 		TTLSeconds:         ttlSecs,
 		IdleTimeoutSeconds: int(idleTimeout.Seconds()),
 	})

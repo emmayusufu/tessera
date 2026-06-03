@@ -149,6 +149,7 @@ type redeemResponseBody struct {
 	Target       string `json:"target"`
 	ExpectedName string `json:"expected_name"`
 	Reason       string `json:"reason"`
+	ExecHint     string `json:"exec_hint"`
 }
 
 // handleRedeem exchanges a bootstrap code for a one-shot guest bundle.
@@ -187,6 +188,7 @@ func (c *Coordinator) handleRedeem(w http.ResponseWriter, r *http.Request) {
 		Target:       b.Target,
 		ExpectedName: b.ExpectedName,
 		Reason:       b.Reason,
+		ExecHint:     b.ExecHint,
 	})
 }
 

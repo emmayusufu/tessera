@@ -22,6 +22,7 @@ type shareUploadRequest struct {
 	Target             string `json:"target"`
 	ExpectedName       string `json:"expected_name"`
 	Reason             string `json:"reason"`
+	ExecHint           string `json:"exec_hint"`
 	TTLSeconds         int    `json:"ttl_seconds"`
 	IdleTimeoutSeconds int    `json:"idle_timeout_seconds"`
 }
@@ -82,6 +83,7 @@ func (c *Coordinator) handleShareUpload(conn net.Conn, m proto.Msg) {
 		Target:             req.Target,
 		ExpectedName:       req.ExpectedName,
 		Reason:             req.Reason,
+		ExecHint:           req.ExecHint,
 		IdleTimeoutSeconds: idle,
 	}
 	code, _, _, err := c.bootstrap.Put(b, time.Duration(ttl)*time.Second)

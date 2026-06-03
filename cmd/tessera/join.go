@@ -37,6 +37,7 @@ type redeemResponse struct {
 	Target       string `json:"target"`
 	ExpectedName string `json:"expected_name"`
 	Reason       string `json:"reason"`
+	ExecHint     string `json:"exec_hint"`
 }
 
 var codeAlphabet = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -137,6 +138,9 @@ func cmdJoin(args []string) {
 	fmt.Printf("approved. forwarding %s -> %s (Ctrl-C to end)\n", *local, bundle.Target)
 
 	localPort, portErr := extractPort(*local, ln)
+	if *execCmd == "" && bundle.ExecHint != "" {
+		*execCmd = bundle.ExecHint
+	}
 	if *execCmd == "" && portErr == nil && strings.HasSuffix(bundle.Target, ":22") {
 		fmt.Printf("Hint: ssh user@127.0.0.1 -p %s\n", localPort)
 	}
@@ -157,6 +161,7 @@ func cmdJoin(args []string) {
 		time.Sleep(200 * time.Millisecond)
 
 		subst := strings.ReplaceAll(*execCmd, "{port}", localPort)
+		fmt.Printf("running: %s\n", subst)
 		cmd := exec.CommandContext(ctx, "sh", "-c", subst)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout

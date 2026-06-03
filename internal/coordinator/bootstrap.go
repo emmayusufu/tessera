@@ -27,6 +27,7 @@ type bootstrapBundle struct {
 	Target             string
 	ExpectedName       string
 	Reason             string
+	ExecHint           string
 	IdleTimeoutSeconds int
 
 	expiresAt time.Time
