@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,7 @@ func cmdJoin(args []string) {
 	baseURL := fs.String("coord-base-url", "", "HTTP(S) base URL of the coordinator's /redeem endpoint (required)")
 	coordAddr := fs.String("coordinator", "", "coordinator mTLS host:port (defaults to base URL host + :8443)")
 	local := fs.String("local", "127.0.0.1:13000", "local address to forward from")
+	execCmd := fs.String("exec", "", "shell command to run after the tunnel opens; {port} is replaced with the local port. When the command exits, the tunnel closes.")
 	_ = fs.Parse(args)
 
 	if *baseURL == "" || *coordAddr == "" {
@@ -134,13 +136,63 @@ func cmdJoin(args []string) {
 	check(err)
 	fmt.Printf("approved. forwarding %s -> %s (Ctrl-C to end)\n", *local, bundle.Target)
 
+	localPort, portErr := extractPort(*local, ln)
+	if *execCmd == "" && portErr == nil && strings.HasSuffix(bundle.Target, ":22") {
+		fmt.Printf("Hint: ssh user@127.0.0.1 -p %s\n", localPort)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	if *execCmd != "" {
+		if portErr != nil {
+			fmt.Fprintln(os.Stderr, portErr)
+			os.Exit(1)
+		}
+		forwardErrCh := make(chan error, 1)
+		go func() {
+			forwardErrCh <- client.Forward(ctx, dial, ctl, sessionID, ln, inner, slog.Default())
+		}()
+
+		time.Sleep(200 * time.Millisecond)
+
+		subst := strings.ReplaceAll(*execCmd, "{port}", localPort)
+		cmd := exec.CommandContext(ctx, "sh", "-c", subst)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		runErr := cmd.Run()
+		stop()
+		<-forwardErrCh
+
+		fmt.Println("session ended.")
+		if runErr != nil {
+			var exitErr *exec.ExitError
+			if errors.As(runErr, &exitErr) {
+				os.Exit(exitErr.ExitCode())
+			}
+			fmt.Fprintln(os.Stderr, runErr)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if err := client.Forward(ctx, dial, ctl, sessionID, ln, inner, slog.Default()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	fmt.Println("session ended.")
+}
+
+func extractPort(local string, ln net.Listener) (string, error) {
+	if _, p, err := net.SplitHostPort(local); err == nil && p != "" && p != "0" {
+		return p, nil
+	}
+	if addr, ok := ln.Addr().(*net.TCPAddr); ok {
+		return fmt.Sprintf("%d", addr.Port), nil
+	}
+	return "", fmt.Errorf("could not determine local port from %q", local)
 }
 
 func normalizeCode(raw string) (string, error) {
