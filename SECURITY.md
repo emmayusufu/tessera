@@ -58,3 +58,27 @@ This is a known, reviewed pattern, not a novel design.
   the CA, not revoking a single certificate.
 
 These are tracked as future work, not oversights.
+
+## Scope of `-shell` and tool escapes
+
+`tessera share -shell` attaches the guest to a PTY running your login shell as
+your user. There is no chroot, no namespace, no sandbox. The guest can read
+anything you can read (`~/.ssh/`, `~/.config/gcloud/`, `~/.aws/`, repo
+contents), write anywhere you can write, and run anything on your `PATH`.
+
+If you do not want the guest to have that, do not use `-shell`. Use
+`-port` or `-service` to expose a single TCP endpoint instead. Use `-shell`
+only with people you would already trust at a terminal on your laptop.
+
+Forwarding a single port is also not a sandbox. Most useful debugging tools
+have a shell escape built in: `psql` has `\!`, `mysql` has `\!`, `kubectl
+exec` runs arbitrary processes in pods you can reach, `vim`/`less`/`man`/
+`git log` all spawn subshells, `redis-cli` can `DEBUG SLEEP` and run Lua. If
+your threat model is "the guest must not reach a shell," do not rely on
+"share access to tool X" as the boundary. Run the tool inside a container or
+VM whose only mounts and credentials are the ones you want shared, and
+share access to that.
+
+Tessera does not provide that isolation and has no plans to. Cross-platform
+sandboxing (chroot, Linux namespaces, macOS `sandbox-exec`) would move it
+out of the "one Go binary you drop on a laptop" niche it is in.
