@@ -161,8 +161,15 @@ func (a *Agent) serveShell(stream net.Conn, m proto.Msg, log *slog.Logger) {
 		cols = 80
 	}
 
-	cmd := exec.Command(shellPath())
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd := exec.Command(shellPath(), "-l", "-i")
+	env := os.Environ()
+	if !hasEnv(env, "TERM") {
+		env = append(env, "TERM=xterm-256color")
+	}
+	if !hasEnv(env, "COLORTERM") {
+		env = append(env, "COLORTERM=truecolor")
+	}
+	cmd.Env = env
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -211,6 +218,16 @@ func shellPath() string {
 		return s
 	}
 	return "/bin/bash"
+}
+
+func hasEnv(env []string, key string) bool {
+	prefix := key + "="
+	for _, kv := range env {
+		if len(kv) >= len(prefix) && kv[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	return false
 }
 
 // readSize reads the 8-byte size header sent by the guest as the very first
