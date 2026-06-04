@@ -215,6 +215,8 @@ func normalizeErr(err error, shareID, certPath string) string {
 		return fmt.Sprintf("no agent online for share-id %s; ask the host to run `tessera agent`", shareID)
 	case strings.Contains(s, "certificate is valid for"):
 		return "TLS hostname mismatch; pass -server-name to match the coordinator certificate"
+	case strings.Contains(s, "denied"):
+		return red(s)
 	}
 	return s
 }

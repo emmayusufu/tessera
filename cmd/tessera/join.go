@@ -169,7 +169,11 @@ func cmdJoin(args []string) {
 	fmt.Printf("Connecting to %s's machine for: %s...\n", cyan(bundle.HostName), dim(bundle.Reason))
 	sessionID, ctl, err := client.Request(dial, who, bundle.ShareID, svc.Target, bundle.Reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, joinDialError(err, dialAddr))
+		msg := joinDialError(err, dialAddr)
+		if strings.Contains(msg, "denied") {
+			msg = red(msg)
+		}
+		fmt.Fprintln(os.Stderr, msg)
 		os.Exit(1)
 	}
 	defer ctl.Close()
