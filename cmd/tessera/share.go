@@ -26,19 +26,48 @@ import (
 )
 
 type shareRequest struct {
-	CAcert             string `json:"ca_cert"`
-	GuestCert          string `json:"guest_cert"`
-	GuestKey           string `json:"guest_key"`
-	CoordAddr          string `json:"coord_addr"`
-	ServerName         string `json:"server_name"`
-	AgentName          string `json:"agent_name"`
-	ShareID            string `json:"share_id"`
-	Target             string `json:"target"`
-	ExpectedName       string `json:"expected_name"`
-	Reason             string `json:"reason"`
-	ExecHint           string `json:"exec_hint"`
-	TTLSeconds         int    `json:"ttl_seconds"`
-	IdleTimeoutSeconds int    `json:"idle_timeout_seconds"`
+	CAcert             string         `json:"ca_cert"`
+	GuestCert          string         `json:"guest_cert"`
+	GuestKey           string         `json:"guest_key"`
+	CoordAddr          string         `json:"coord_addr"`
+	ServerName         string         `json:"server_name"`
+	AgentName          string         `json:"agent_name"`
+	ShareID            string         `json:"share_id"`
+	Services           []shareService `json:"services"`
+	ExpectedName       string         `json:"expected_name"`
+	Reason             string         `json:"reason"`
+	TTLSeconds         int            `json:"ttl_seconds"`
+	IdleTimeoutSeconds int            `json:"idle_timeout_seconds"`
+}
+
+type shareService struct {
+	Name     string `json:"name"`
+	Target   string `json:"target"`
+	ExecHint string `json:"exec_hint,omitempty"`
+}
+
+// flagSlice collects repeated string flags so callers can pass -service multiple times.
+type flagSlice []string
+
+func (f *flagSlice) String() string     { return strings.Join(*f, ",") }
+func (f *flagSlice) Set(v string) error { *f = append(*f, v); return nil }
+
+// parseServiceFlag splits a "name=host:port" value. Whitespace around the name
+// and target is trimmed; the host:port is validated.
+func parseServiceFlag(raw string) (shareService, error) {
+	eq := strings.IndexByte(raw, '=')
+	if eq <= 0 {
+		return shareService{}, fmt.Errorf("service %q must be name=host:port", raw)
+	}
+	name := strings.TrimSpace(raw[:eq])
+	target := strings.TrimSpace(raw[eq+1:])
+	if name == "" || target == "" {
+		return shareService{}, fmt.Errorf("service %q must be name=host:port", raw)
+	}
+	if _, _, err := net.SplitHostPort(target); err != nil {
+		return shareService{}, fmt.Errorf("service %q: bad target: %w", raw, err)
+	}
+	return shareService{Name: name, Target: target}, nil
 }
 
 // deriveExecHint guesses a sensible guest-side command from a host:port target
@@ -74,6 +103,8 @@ func cmdShare(args []string) {
 	fs := flag.NewFlagSet("share", flag.ExitOnError)
 	port := fs.Int("port", 0, "local port to forward; sets target to 127.0.0.1:<port>")
 	target := fs.String("target", "", "host:port the guest will reach (alternative to -port)")
+	var services flagSlice
+	fs.Var(&services, "service", "named service to share, repeatable: -service name=host:port")
 	reason := fs.String("reason", "", "reason shown to the host")
 	expectedName := fs.String("expected-name", os.Getenv("USER"), "the name you expect the guest to be")
 	coordAddr := fs.String("coordinator", "", "coordinator mTLS address host:port (required)")
@@ -82,7 +113,7 @@ func cmdShare(args []string) {
 	ttl := fs.Duration("ttl", 90*time.Second, "share code TTL")
 	maxDuration := fs.Duration("max-duration", 0, "kill the share session after this wall-clock duration regardless of activity (0 disables)")
 	idleTimeout := fs.Duration("idle-timeout", 30*time.Minute, "close a stream after this much idle time (clamped to [1m, 24h] by the coordinator)")
-	execHint := fs.String("exec-hint", "", "command the guest should run after connecting; {port} is replaced with the guest's local port. If empty, derived from the target port.")
+	execHint := fs.String("exec-hint", "", "command the guest should run after connecting; {port} is replaced with the guest's local port. Single-service only; for -service use the port-based default. If empty, derived from the target port.")
 	_ = fs.Parse(args)
 
 	dir := *configDir
@@ -98,13 +129,47 @@ func cmdShare(args []string) {
 		fmt.Fprintln(os.Stderr, "share: -coordinator is required (run `tessera link` once to save it)")
 		os.Exit(2)
 	}
-	resolvedTarget := *target
-	if resolvedTarget == "" {
-		if *port == 0 {
-			fmt.Fprintln(os.Stderr, "share: pass -port or -target")
+	var svcList []shareService
+	switch {
+	case len(services) > 0:
+		if *port != 0 || *target != "" {
+			fmt.Fprintln(os.Stderr, "share: -service cannot be combined with -port or -target")
 			os.Exit(2)
 		}
-		resolvedTarget = fmt.Sprintf("127.0.0.1:%d", *port)
+		for _, raw := range services {
+			s, err := parseServiceFlag(raw)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "share:", err)
+				os.Exit(2)
+			}
+			s.ExecHint = deriveExecHint(s.Target)
+			svcList = append(svcList, s)
+		}
+		if len(svcList) > 1 && *execHint != "" {
+			fmt.Fprintln(os.Stderr, "share: -exec-hint is only supported with a single service")
+			os.Exit(2)
+		}
+		if len(svcList) == 1 && *execHint != "" {
+			svcList[0].ExecHint = *execHint
+		}
+	default:
+		resolvedTarget := *target
+		if resolvedTarget == "" {
+			if *port == 0 {
+				fmt.Fprintln(os.Stderr, "share: pass -port, -target, or -service")
+				os.Exit(2)
+			}
+			resolvedTarget = fmt.Sprintf("127.0.0.1:%d", *port)
+		}
+		hint := *execHint
+		if hint == "" {
+			hint = deriveExecHint(resolvedTarget)
+		}
+		svcList = []shareService{{Name: "default", Target: resolvedTarget, ExecHint: hint}}
+	}
+	allowed := make([]string, 0, len(svcList))
+	for _, s := range svcList {
+		allowed = append(allowed, s.Target)
 	}
 	name := *serverName
 	if name == "" {
@@ -146,7 +211,7 @@ func cmdShare(args []string) {
 	ag := &agent.Agent{
 		ShareID: shareID,
 		Dial:    dial,
-		Allowed: []string{resolvedTarget},
+		Allowed: allowed,
 		Inner:   inner,
 		Logger:  log,
 	}
@@ -170,11 +235,6 @@ func cmdShare(args []string) {
 		ttlSecs = 600
 	}
 
-	resolvedHint := *execHint
-	if resolvedHint == "" {
-		resolvedHint = deriveExecHint(resolvedTarget)
-	}
-
 	body, err := json.Marshal(shareRequest{
 		CAcert:             string(ca.Cert),
 		GuestCert:          string(guestID.Cert),
@@ -183,10 +243,9 @@ func cmdShare(args []string) {
 		ServerName:         name,
 		AgentName:          agentName,
 		ShareID:            shareID,
-		Target:             resolvedTarget,
+		Services:           svcList,
 		ExpectedName:       *expectedName,
 		Reason:             *reason,
-		ExecHint:           resolvedHint,
 		TTLSeconds:         ttlSecs,
 		IdleTimeoutSeconds: int(idleTimeout.Seconds()),
 	})
@@ -200,7 +259,7 @@ func cmdShare(args []string) {
 
 	printCodeBox(code, ttlSecs)
 
-	approveLoop(ctx, *coordAddr, name, shareID, *expectedName, hostID, ca, time.Duration(ttlSecs)*time.Second, *maxDuration)
+	approveLoop(ctx, *coordAddr, name, shareID, *expectedName, svcList, hostID, ca, time.Duration(ttlSecs)*time.Second, *maxDuration)
 }
 
 // uploadShare opens a fresh mTLS connection to the coordinator and sends one
@@ -269,6 +328,16 @@ func printCodeBox(code string, ttlSecs int) {
 	fmt.Println("Waiting for the guest to connect...")
 }
 
+// formatServices renders the bundle's services for the host's approval prompt.
+// Names and targets are host-provided, but sanitize anyway for symmetry.
+func formatServices(list []shareService) string {
+	parts := make([]string, 0, len(list))
+	for _, s := range list {
+		parts = append(parts, fmt.Sprintf("%s (%s)", sanitize(s.Name), sanitize(s.Target)))
+	}
+	return strings.Join(parts, ", ")
+}
+
 // sanitize strips ASCII control bytes and caps length, so a guest can't
 // smuggle ANSI escapes into the host's terminal prompt.
 func sanitize(s string) string {
@@ -288,7 +357,7 @@ func sanitize(s string) string {
 	return b.String()
 }
 
-func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedName string, hostID, ca certs.Identity, ttl, maxDuration time.Duration) {
+func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedName string, svcList []shareService, hostID, ca certs.Identity, ttl, maxDuration time.Duration) {
 	cfg, err := certs.ClientTLS(hostID, ca, serverName)
 	check(err)
 
@@ -352,8 +421,8 @@ func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedNa
 				if !strings.EqualFold(strings.TrimSpace(m.Who), strings.TrimSpace(expectedName)) {
 					warn = "WARNING: name mismatch. "
 				}
-				fmt.Printf("\n%s%s (expected: %s) wants access to %s. Reason: %s. approve? [y/N] ",
-					warn, sanitize(m.Who), sanitize(expectedName), sanitize(m.Target), sanitize(m.Reason))
+				fmt.Printf("\n%s%s (expected: %s) wants access to share %s services: %s. Reason: %s. approve? [y/N] ",
+					warn, sanitize(m.Who), sanitize(expectedName), sanitize(shareID), formatServices(svcList), sanitize(m.Reason))
 				line, err := in.ReadString('\n')
 				if err != nil {
 					return

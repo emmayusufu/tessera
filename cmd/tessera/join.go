@@ -26,18 +26,30 @@ import (
 	"github.com/emmayusufu/tessera/internal/netutil"
 )
 
+type redeemService struct {
+	Name     string `json:"name"`
+	Target   string `json:"target"`
+	ExecHint string `json:"exec_hint,omitempty"`
+}
+
 type redeemResponse struct {
-	CAcert       string `json:"ca_cert"`
-	GuestCert    string `json:"guest_cert"`
-	GuestKey     string `json:"guest_key"`
-	CoordAddr    string `json:"coord_addr"`
-	ServerName   string `json:"server_name"`
-	AgentName    string `json:"agent_name"`
-	ShareID      string `json:"share_id"`
-	Target       string `json:"target"`
-	ExpectedName string `json:"expected_name"`
-	Reason       string `json:"reason"`
-	ExecHint     string `json:"exec_hint"`
+	CAcert       string          `json:"ca_cert"`
+	GuestCert    string          `json:"guest_cert"`
+	GuestKey     string          `json:"guest_key"`
+	CoordAddr    string          `json:"coord_addr"`
+	ServerName   string          `json:"server_name"`
+	AgentName    string          `json:"agent_name"`
+	ShareID      string          `json:"share_id"`
+	Services     []redeemService `json:"services"`
+	ExpectedName string          `json:"expected_name"`
+	Reason       string          `json:"reason"`
+}
+
+type peekResponse struct {
+	ExpectedName string   `json:"expected_name"`
+	Reason       string   `json:"reason"`
+	ServiceNames []string `json:"service_names"`
+	ExpiresAt    string   `json:"expires_at"`
 }
 
 var codeAlphabet = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -48,6 +60,7 @@ func cmdJoin(args []string) {
 	coordAddr := fs.String("coordinator", "", "coordinator mTLS host:port (defaults to base URL host + :8443)")
 	local := fs.String("local", "127.0.0.1:13000", "local address to forward from")
 	execCmd := fs.String("exec", "", "shell command to run after the tunnel opens; {port} is replaced with the local port. When the command exits, the tunnel closes.")
+	serviceName := fs.String("service", "", "service name to connect to (required when the share offers more than one)")
 	_ = fs.Parse(args)
 
 	if *baseURL == "" || *coordAddr == "" {
@@ -87,9 +100,31 @@ func cmdJoin(args []string) {
 		os.Exit(1)
 	}
 
+	peek, err := peekCode(*baseURL, normalized)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if len(peek.ServiceNames) == 0 {
+		fmt.Fprintln(os.Stderr, "join: share has no services")
+		os.Exit(1)
+	}
+
+	chosen, err := pickService(in, peek.ServiceNames, *serviceName)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	bundle, err := redeem(*baseURL, normalized)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	svc, ok := findService(bundle.Services, chosen)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "join: service %q not in bundle (got %v)\n", chosen, serviceNames(bundle.Services))
 		os.Exit(1)
 	}
 
@@ -126,7 +161,7 @@ func cmdJoin(args []string) {
 	dial := netutil.Dialer(func() (net.Conn, error) { return tls.Dial("tcp", dialAddr, outer) })
 
 	fmt.Printf("Connecting to %s's machine for: %s...\n", bundle.ExpectedName, bundle.Reason)
-	sessionID, ctl, err := client.Request(dial, who, bundle.ShareID, bundle.Target, bundle.Reason)
+	sessionID, ctl, err := client.Request(dial, who, bundle.ShareID, svc.Target, bundle.Reason)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, joinDialError(err, dialAddr))
 		os.Exit(1)
@@ -135,13 +170,13 @@ func cmdJoin(args []string) {
 
 	ln, err := net.Listen("tcp", *local)
 	check(err)
-	fmt.Printf("approved. forwarding %s -> %s (Ctrl-C to end)\n", *local, bundle.Target)
+	fmt.Printf("approved. forwarding %s -> %s [%s] (Ctrl-C to end)\n", *local, svc.Target, svc.Name)
 
 	localPort, portErr := extractPort(*local, ln)
-	if *execCmd == "" && bundle.ExecHint != "" {
-		*execCmd = bundle.ExecHint
+	if *execCmd == "" && svc.ExecHint != "" {
+		*execCmd = svc.ExecHint
 	}
-	if *execCmd == "" && portErr == nil && strings.HasSuffix(bundle.Target, ":22") {
+	if *execCmd == "" && portErr == nil && strings.HasSuffix(svc.Target, ":22") {
 		fmt.Printf("Hint: ssh user@127.0.0.1 -p %s\n", localPort)
 	}
 
@@ -227,6 +262,81 @@ func deriveCoordAddr(baseURL, override string) (string, error) {
 		return "", fmt.Errorf("invalid -coord-base-url: missing host")
 	}
 	return net.JoinHostPort(host, "8443"), nil
+}
+
+func pickService(in *bufio.Reader, names []string, requested string) (string, error) {
+	if requested != "" {
+		for _, n := range names {
+			if n == requested {
+				return n, nil
+			}
+		}
+		return "", fmt.Errorf("service %q not offered; available: %s", requested, strings.Join(names, ", "))
+	}
+	if len(names) == 1 {
+		return names[0], nil
+	}
+	fmt.Printf("Services: %s\n", strings.Join(names, ", "))
+	fmt.Printf("Pick one [%s]: ", strings.Join(names, "/"))
+	line, err := in.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	pick := strings.TrimSpace(line)
+	for _, n := range names {
+		if n == pick {
+			return n, nil
+		}
+	}
+	return "", fmt.Errorf("unknown service %q; available: %s", pick, strings.Join(names, ", "))
+}
+
+func findService(list []redeemService, name string) (redeemService, bool) {
+	for _, s := range list {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return redeemService{}, false
+}
+
+func serviceNames(list []redeemService) []string {
+	out := make([]string, 0, len(list))
+	for _, s := range list {
+		out = append(out, s.Name)
+	}
+	return out
+}
+
+func peekCode(baseURL, code string) (*peekResponse, error) {
+	endpoint := strings.TrimRight(baseURL, "/") + "/peek/" + code
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	resp, err := httpClient.Get(endpoint)
+	if err != nil {
+		return nil, redeemDialError(err, baseURL)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return nil, errors.New("code not recognized; ask the host to re-run `tessera share`")
+	case http.StatusGone:
+		return nil, errors.New("code already used or expired; ask the host for a new one")
+	case http.StatusLocked:
+		return nil, errors.New("too many wrong attempts; try again in a few minutes")
+	case http.StatusTooManyRequests:
+		return nil, errors.New("rate limited; wait a moment")
+	default:
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("peek failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var out peekResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decoding peek response: %w", err)
+	}
+	return &out, nil
 }
 
 func redeem(baseURL, code string) (*redeemResponse, error) {

@@ -56,7 +56,7 @@ func sampleBundle() *bootstrapBundle {
 		ServerName:   "host.sslip.io",
 		AgentName:    "agent",
 		ShareID:      "demo",
-		Target:       "127.0.0.1:22",
+		Services:     []bundleService{{Name: "default", Target: "127.0.0.1:22"}},
 		ExpectedName: "host",
 		Reason:       "ssh in",
 	}
@@ -73,7 +73,7 @@ func TestBootstrapPutRedeem(t *testing.T) {
 	if !found || used {
 		t.Fatalf("first redeem: found=%v used=%v, want true,false", found, used)
 	}
-	if b.ShareID != "demo" || b.Target != "127.0.0.1:22" || b.CAcert != "ca" {
+	if b.ShareID != "demo" || len(b.Services) != 1 || b.Services[0].Target != "127.0.0.1:22" || b.CAcert != "ca" {
 		t.Fatalf("bundle fields wrong: %+v", b)
 	}
 
@@ -167,6 +167,34 @@ func readAuditKinds(t *testing.T, path string) []string {
 		kinds = append(kinds, e.Kind)
 	}
 	return kinds
+}
+
+func TestBootstrapPeekDoesNotConsume(t *testing.T) {
+	s, _ := newTestStore(t)
+	code, _, _, err := s.Put(sampleBundle(), 60*time.Second)
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		b, found, used := s.Peek(code)
+		if !found || used {
+			t.Fatalf("peek %d: found=%v used=%v", i, found, used)
+		}
+		if b.ShareID != "demo" {
+			t.Fatalf("peek %d: share id=%q", i, b.ShareID)
+		}
+	}
+
+	if _, found, used := s.Redeem(code); !found || used {
+		t.Fatalf("redeem after peeks: found=%v used=%v, want true,false", found, used)
+	}
+	if _, _, used := s.Redeem(code); !used {
+		t.Fatal("redeem after consumed should report used=true")
+	}
+	if _, found, used := s.Peek(code); !found || !used {
+		t.Fatalf("peek after consume: found=%v used=%v, want true,true", found, used)
+	}
 }
 
 func TestBootstrapJanitorWritesExpired(t *testing.T) {

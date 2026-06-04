@@ -16,6 +16,12 @@ import (
 
 const bootstrapAlphabet = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
 
+type bundleService struct {
+	Name     string
+	Target   string
+	ExecHint string
+}
+
 type bootstrapBundle struct {
 	CAcert             string
 	GuestCert          string
@@ -24,14 +30,27 @@ type bootstrapBundle struct {
 	ServerName         string
 	AgentName          string
 	ShareID            string
-	Target             string
+	Services           []bundleService
 	ExpectedName       string
 	Reason             string
-	ExecHint           string
 	IdleTimeoutSeconds int
 
 	expiresAt time.Time
 	consumed  bool
+}
+
+func (b *bootstrapBundle) targetSummary() string {
+	if len(b.Services) == 0 {
+		return ""
+	}
+	if len(b.Services) == 1 {
+		return b.Services[0].Target
+	}
+	parts := make([]string, 0, len(b.Services))
+	for _, s := range b.Services {
+		parts = append(parts, s.Name+"="+s.Target)
+	}
+	return strings.Join(parts, ",")
 }
 
 type bootstrapStore struct {
@@ -72,11 +91,28 @@ func (s *bootstrapStore) Put(b *bootstrapBundle, ttl time.Duration) (string, str
 	_ = s.audit.Write(audit.Event{
 		Kind:    "bootstrap_minted",
 		ShareID: b.ShareID,
-		Target:  b.Target,
+		Target:  b.targetSummary(),
 		Reason:  b.Reason,
 		Token:   hashCode(canonical),
 	})
 	return code, canonical, b.expiresAt, nil
+}
+
+// Peek returns the bundle without consuming it. Used by the guest CLI to fetch
+// the services list before the user commits to redeeming the one-shot code.
+func (s *bootstrapStore) Peek(code string) (*bootstrapBundle, bool, bool) {
+	n := normalizeCode(code)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.bundles[n]
+	if !ok {
+		return nil, false, false
+	}
+	if b.consumed || !time.Now().Before(b.expiresAt) {
+		return nil, true, true
+	}
+	return b, true, false
 }
 
 // Redeem returns (bundle, found, alreadyUsed). found=false means the code has
@@ -101,7 +137,7 @@ func (s *bootstrapStore) Redeem(code string) (*bootstrapBundle, bool, bool) {
 	_ = s.audit.Write(audit.Event{
 		Kind:    "bootstrap_redeemed",
 		ShareID: b.ShareID,
-		Target:  b.Target,
+		Target:  b.targetSummary(),
 		Reason:  b.Reason,
 		Token:   hashCode(n),
 	})
@@ -134,7 +170,7 @@ func (s *bootstrapStore) sweep() {
 	s.mu.Lock()
 	for k, b := range s.bundles {
 		if !now.Before(b.expiresAt) {
-			drop = append(drop, expired{k, b.ShareID, b.Target, b.Reason})
+			drop = append(drop, expired{k, b.ShareID, b.targetSummary(), b.Reason})
 			delete(s.bundles, k)
 		}
 	}

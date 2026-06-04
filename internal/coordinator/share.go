@@ -12,19 +12,24 @@ import (
 // shareUploadRequest is the JSON body the host sends inside a KindShareUpload
 // frame. It mirrors the redeem response so the guest sees a matching bundle.
 type shareUploadRequest struct {
-	CAcert             string `json:"ca_cert"`
-	GuestCert          string `json:"guest_cert"`
-	GuestKey           string `json:"guest_key"`
-	CoordAddr          string `json:"coord_addr"`
-	ServerName         string `json:"server_name"`
-	AgentName          string `json:"agent_name"`
-	ShareID            string `json:"share_id"`
-	Target             string `json:"target"`
-	ExpectedName       string `json:"expected_name"`
-	Reason             string `json:"reason"`
-	ExecHint           string `json:"exec_hint"`
-	TTLSeconds         int    `json:"ttl_seconds"`
-	IdleTimeoutSeconds int    `json:"idle_timeout_seconds"`
+	CAcert             string               `json:"ca_cert"`
+	GuestCert          string               `json:"guest_cert"`
+	GuestKey           string               `json:"guest_key"`
+	CoordAddr          string               `json:"coord_addr"`
+	ServerName         string               `json:"server_name"`
+	AgentName          string               `json:"agent_name"`
+	ShareID            string               `json:"share_id"`
+	Services           []shareUploadService `json:"services"`
+	ExpectedName       string               `json:"expected_name"`
+	Reason             string               `json:"reason"`
+	TTLSeconds         int                  `json:"ttl_seconds"`
+	IdleTimeoutSeconds int                  `json:"idle_timeout_seconds"`
+}
+
+type shareUploadService struct {
+	Name     string `json:"name"`
+	Target   string `json:"target"`
+	ExecHint string `json:"exec_hint,omitempty"`
 }
 
 func (c *Coordinator) handleShareUpload(conn net.Conn, m proto.Msg) {
@@ -42,6 +47,24 @@ func (c *Coordinator) handleShareUpload(conn net.Conn, m proto.Msg) {
 	if req.ShareID == "" {
 		_ = proto.WriteMsg(conn, proto.Msg{Kind: proto.KindShareResponse, Detail: "share_id required"})
 		return
+	}
+	if len(req.Services) == 0 {
+		_ = proto.WriteMsg(conn, proto.Msg{Kind: proto.KindShareResponse, Detail: "at least one service required"})
+		return
+	}
+	seen := make(map[string]struct{}, len(req.Services))
+	services := make([]bundleService, 0, len(req.Services))
+	for _, svc := range req.Services {
+		if svc.Name == "" || svc.Target == "" {
+			_ = proto.WriteMsg(conn, proto.Msg{Kind: proto.KindShareResponse, Detail: "service name and target required"})
+			return
+		}
+		if _, dup := seen[svc.Name]; dup {
+			_ = proto.WriteMsg(conn, proto.Msg{Kind: proto.KindShareResponse, Detail: "duplicate service name"})
+			return
+		}
+		seen[svc.Name] = struct{}{}
+		services = append(services, bundleService{Name: svc.Name, Target: svc.Target, ExecHint: svc.ExecHint})
 	}
 
 	c.mu.Lock()
@@ -80,10 +103,9 @@ func (c *Coordinator) handleShareUpload(conn net.Conn, m proto.Msg) {
 		ServerName:         req.ServerName,
 		AgentName:          req.AgentName,
 		ShareID:            req.ShareID,
-		Target:             req.Target,
+		Services:           services,
 		ExpectedName:       req.ExpectedName,
 		Reason:             req.Reason,
-		ExecHint:           req.ExecHint,
 		IdleTimeoutSeconds: idle,
 	}
 	code, _, _, err := c.bootstrap.Put(b, time.Duration(ttl)*time.Second)

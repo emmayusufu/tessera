@@ -29,7 +29,7 @@ func TestRedeemRoute(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.ShareID != "demo" || got.Target != "127.0.0.1:22" {
+	if got.ShareID != "demo" || len(got.Services) != 1 || got.Services[0].Target != "127.0.0.1:22" {
 		t.Fatalf("bundle fields wrong: %+v", got)
 	}
 
@@ -55,6 +55,82 @@ func TestRedeemRouteNotFound(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown code = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestPeekRouteHappyPath(t *testing.T) {
+	c := newTestCoordinator(t)
+	b := sampleBundle()
+	b.Services = []bundleService{
+		{Name: "ssh", Target: "127.0.0.1:22"},
+		{Name: "pg", Target: "127.0.0.1:5432"},
+	}
+	code, _, _, err := c.bootstrap.Put(b, 60*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(c.httpMux())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/peek/" + code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("peek = %d, want 200", resp.StatusCode)
+	}
+	var got peekResponseBody
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.ServiceNames) != 2 || got.ServiceNames[0] != "ssh" || got.ServiceNames[1] != "pg" {
+		t.Fatalf("service names = %v", got.ServiceNames)
+	}
+
+	// Peek must not consume; the code stays redeemable.
+	resp2, err := http.Post(srv.URL+"/redeem/"+code, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("redeem after peek = %d, want 200", resp2.StatusCode)
+	}
+}
+
+func TestPeekRouteNotFound(t *testing.T) {
+	c := newTestCoordinator(t)
+	srv := httptest.NewServer(c.httpMux())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/peek/UNKNOWN1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown code = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestPeekRouteExpired(t *testing.T) {
+	c := newTestCoordinator(t)
+	code, _, _, err := c.bootstrap.Put(sampleBundle(), 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	srv := httptest.NewServer(c.httpMux())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/peek/" + code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusGone {
+		t.Fatalf("expired peek = %d, want 410", resp.StatusCode)
 	}
 }
 
