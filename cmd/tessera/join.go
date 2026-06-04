@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -21,9 +22,12 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/emmayusufu/tessera/internal/certs"
 	"github.com/emmayusufu/tessera/internal/client"
 	"github.com/emmayusufu/tessera/internal/netutil"
+	"github.com/emmayusufu/tessera/internal/proto"
 )
 
 type redeemService struct {
@@ -167,6 +171,18 @@ func cmdJoin(args []string) {
 		os.Exit(1)
 	}
 	defer ctl.Close()
+
+	if svc.Target == "shell" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		fmt.Printf("approved. attaching shell [%s] (Ctrl-D or exit to end)\n", svc.Name)
+		if err := runShellSession(ctx, dial, ctl, sessionID, inner); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("session ended.")
+		return
+	}
 
 	ln, err := net.Listen("tcp", *local)
 	check(err)
@@ -388,4 +404,91 @@ func joinDialError(err error, addr string) string {
 		return fmt.Sprintf("could not reach the coordinator at %s; check your internet connection", addr)
 	}
 	return s
+}
+
+// runShellSession opens one inner-TLS data stream, sends the initial terminal
+// size as an 8-byte header (rows, cols big-endian uint32), then pipes the
+// local terminal in raw mode against the remote PTY. Mid-session resize is
+// not propagated; quit and reopen if the window changes.
+func runShellSession(ctx context.Context, dial netutil.Dialer, ctl net.Conn, sessionID string, inner *tls.Config) error {
+	if inner == nil {
+		return fmt.Errorf("shell: inner TLS config is required")
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	go func() {
+		for {
+			if _, err := proto.ReadMsg(ctl); err != nil {
+				cancel()
+				return
+			}
+		}
+	}()
+
+	data, err := dial()
+	if err != nil {
+		return fmt.Errorf("shell dial: %w", err)
+	}
+	defer data.Close()
+
+	if err := proto.WriteMsg(data, proto.Msg{Kind: proto.KindDataHello, Role: "guest", SessionID: sessionID}); err != nil {
+		return fmt.Errorf("shell hello: %w", err)
+	}
+
+	ic := tls.Client(data, inner)
+	hsCtx, hsCancel := context.WithTimeout(ctx, 15*time.Second)
+	err = ic.HandshakeContext(hsCtx)
+	hsCancel()
+	if err != nil {
+		return fmt.Errorf("shell inner TLS handshake: %w", err)
+	}
+	defer ic.Close()
+
+	rows, cols := terminalSize()
+	var hdr [8]byte
+	binary.BigEndian.PutUint32(hdr[0:4], uint32(rows))
+	binary.BigEndian.PutUint32(hdr[4:8], uint32(cols))
+	if _, err := ic.Write(hdr[:]); err != nil {
+		return fmt.Errorf("shell size header: %w", err)
+	}
+
+	fd := int(os.Stdin.Fd())
+	var restore func()
+	if term.IsTerminal(fd) {
+		st, err := term.MakeRaw(fd)
+		if err == nil {
+			restore = func() { _ = term.Restore(fd, st) }
+			defer restore()
+		}
+	}
+
+	go func() {
+		<-ctx.Done()
+		ic.Close()
+	}()
+
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(ic, os.Stdin)
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(os.Stdout, ic)
+		done <- struct{}{}
+	}()
+	<-done
+	return nil
+}
+
+func terminalSize() (rows, cols int) {
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		w, h, err := term.GetSize(fd)
+		if err == nil {
+			return h, w
+		}
+	}
+	return 24, 80
 }

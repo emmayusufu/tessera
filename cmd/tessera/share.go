@@ -105,6 +105,8 @@ func cmdShare(args []string) {
 	target := fs.String("target", "", "host:port the guest will reach (alternative to -port)")
 	var services flagSlice
 	fs.Var(&services, "service", "named service to share, repeatable: -service name=host:port")
+	shell := fs.Bool("shell", false, "share an interactive shell on this host (PTY) instead of forwarding a port")
+	noRecord := fs.Bool("no-record", false, "with -shell, disable session recording")
 	reason := fs.String("reason", "", "reason shown to the host")
 	expectedName := fs.String("expected-name", os.Getenv("USER"), "the name you expect the guest to be")
 	coordAddr := fs.String("coordinator", "", "coordinator mTLS address host:port (required)")
@@ -131,6 +133,16 @@ func cmdShare(args []string) {
 	}
 	var svcList []shareService
 	switch {
+	case *shell:
+		if *port != 0 || *target != "" || len(services) > 0 {
+			fmt.Fprintln(os.Stderr, "share: -shell cannot be combined with -port, -target, or -service")
+			os.Exit(2)
+		}
+		if *execHint != "" {
+			fmt.Fprintln(os.Stderr, "share: -exec-hint is not used with -shell")
+			os.Exit(2)
+		}
+		svcList = []shareService{{Name: "shell", Target: "shell"}}
 	case len(services) > 0:
 		if *port != 0 || *target != "" {
 			fmt.Fprintln(os.Stderr, "share: -service cannot be combined with -port or -target")
@@ -208,12 +220,24 @@ func cmdShare(args []string) {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	dial := netutil.Dialer(func() (net.Conn, error) { return tls.Dial("tcp", *coordAddr, outer) })
+
+	var recordPath string
+	if *shell && !*noRecord {
+		recordPath = sessionsDir(dir)
+		if err := os.MkdirAll(recordPath, 0o700); err != nil {
+			fmt.Fprintln(os.Stderr, "share: could not create sessions dir:", err)
+			os.Exit(1)
+		}
+	}
+
 	ag := &agent.Agent{
-		ShareID: shareID,
-		Dial:    dial,
-		Allowed: allowed,
-		Inner:   inner,
-		Logger:  log,
+		ShareID:    shareID,
+		Dial:       dial,
+		Allowed:    allowed,
+		Inner:      inner,
+		Logger:     log,
+		ShellMode:  *shell,
+		RecordPath: recordPath,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

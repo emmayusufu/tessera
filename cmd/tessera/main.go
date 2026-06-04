@@ -197,6 +197,15 @@ func defaultConfigDir() string {
 	return filepath.Join(os.Getenv("HOME"), ".config", "tessera")
 }
 
+// sessionsDir returns the directory for shell session transcripts. It prefers
+// $XDG_DATA_HOME/tessera/sessions and falls back to <configDir>/sessions.
+func sessionsDir(configDir string) string {
+	if x := os.Getenv("XDG_DATA_HOME"); x != "" {
+		return filepath.Join(x, "tessera", "sessions")
+	}
+	return filepath.Join(configDir, "sessions")
+}
+
 func normalizeErr(err error, shareID, certPath string) string {
 	s := err.Error()
 	switch {
