@@ -475,7 +475,7 @@ func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedNa
 				}
 			case proto.KindSessionEnded:
 				if firstSeen {
-					fmt.Fprint(os.Stderr, "\x1b[0m")
+					fmt.Fprint(os.Stderr, reset())
 					fmt.Fprintln(os.Stderr, dim("session ended; tessera share exiting"))
 					return
 				}
