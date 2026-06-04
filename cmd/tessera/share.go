@@ -364,8 +364,10 @@ func formatServices(list []shareService) string {
 	return strings.Join(parts, ", ")
 }
 
-// sanitize strips ASCII control bytes and caps length, so a guest can't
-// smuggle ANSI escapes into the host's terminal prompt.
+// sanitize strips ASCII control bytes and caps length, so a counterparty
+// can't smuggle ANSI escapes into our terminal. The host applies it to
+// guest-supplied fields (Who, Reason) and the guest applies it to
+// host-supplied fields (HostName, Reason, service Name/Target).
 func sanitize(s string) string {
 	const max = 200
 	var b strings.Builder
@@ -381,6 +383,15 @@ func sanitize(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// sanitizeAll maps sanitize over a slice; the returned slice is a copy.
+func sanitizeAll(in []string) []string {
+	out := make([]string, len(in))
+	for i, s := range in {
+		out[i] = sanitize(s)
+	}
+	return out
 }
 
 func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedName string, svcList []shareService, hostID, ca certs.Identity, ttl, maxDuration time.Duration, recordDir string) {

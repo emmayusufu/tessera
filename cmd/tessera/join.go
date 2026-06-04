@@ -140,7 +140,7 @@ func cmdJoin(args []string) {
 
 	svc, ok := findService(bundle.Services, chosen)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "join: service %q not in bundle (got %v)\n", chosen, serviceNames(bundle.Services))
+		fmt.Fprintf(os.Stderr, "join: service %q not in bundle (got %v)\n", chosen, sanitizeAll(serviceNames(bundle.Services)))
 		os.Exit(1)
 	}
 
@@ -176,7 +176,7 @@ func cmdJoin(args []string) {
 
 	dial := netutil.Dialer(func() (net.Conn, error) { return tls.Dial("tcp", dialAddr, outer) })
 
-	fmt.Printf("Connecting to %s's machine for: %s...\n", cyan(bundle.HostName), dim(bundle.Reason))
+	fmt.Printf("Connecting to %s's machine for: %s...\n", cyan(sanitize(bundle.HostName)), dim(sanitize(bundle.Reason)))
 	sessionID, ctl, err := client.Request(dial, who, bundle.ShareID, svc.Target, bundle.Reason)
 	if err != nil {
 		msg := joinDialError(err, dialAddr)
@@ -191,7 +191,7 @@ func cmdJoin(args []string) {
 	if svc.Target == "shell" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		fmt.Printf("approved. attaching shell [%s] (Ctrl-D or exit to end)\n", svc.Name)
+		fmt.Printf("approved. attaching shell [%s] (Ctrl-D or exit to end)\n", sanitize(svc.Name))
 		if err := runShellSession(ctx, dial, ctl, sessionID, inner); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -202,7 +202,7 @@ func cmdJoin(args []string) {
 
 	ln, err := net.Listen("tcp", *local)
 	check(err)
-	fmt.Printf("approved. forwarding %s -> %s [%s] (Ctrl-C to end)\n", *local, svc.Target, svc.Name)
+	fmt.Printf("approved. forwarding %s -> %s [%s] (Ctrl-C to end)\n", *local, sanitize(svc.Target), sanitize(svc.Name))
 
 	localPort, portErr := extractPort(*local, ln)
 	if *execCmd == "" && portErr == nil {
@@ -296,19 +296,20 @@ func deriveCoordAddr(baseURL, override string) (string, error) {
 }
 
 func pickService(in *bufio.Reader, names []string, requested string) (string, error) {
+	clean := sanitizeAll(names)
 	if requested != "" {
 		for _, n := range names {
 			if n == requested {
 				return n, nil
 			}
 		}
-		return "", fmt.Errorf("service %q not offered; available: %s", requested, strings.Join(names, ", "))
+		return "", fmt.Errorf("service %q not offered; available: %s", requested, strings.Join(clean, ", "))
 	}
 	if len(names) == 1 {
 		return names[0], nil
 	}
-	fmt.Printf("Services: %s\n", strings.Join(names, ", "))
-	fmt.Printf("Pick one [%s]: ", strings.Join(names, "/"))
+	fmt.Printf("Services: %s\n", strings.Join(clean, ", "))
+	fmt.Printf("Pick one [%s]: ", strings.Join(clean, "/"))
 	line, err := in.ReadString('\n')
 	if err != nil {
 		return "", err
