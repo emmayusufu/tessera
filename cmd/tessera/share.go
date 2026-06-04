@@ -277,7 +277,7 @@ func cmdShare(args []string) {
 
 	printCodeBox(code, ttlSecs)
 
-	approveLoop(ctx, *coordAddr, name, shareID, *expectedName, svcList, hostID, ca, time.Duration(ttlSecs)*time.Second, *maxDuration)
+	approveLoop(ctx, *coordAddr, name, shareID, *expectedName, svcList, hostID, ca, time.Duration(ttlSecs)*time.Second, *maxDuration, recordPath)
 }
 
 // uploadShare opens a fresh mTLS connection to the coordinator and sends one
@@ -330,18 +330,19 @@ func uploadShareOnce(coordAddr string, outer *tls.Config, body string) (string, 
 }
 
 func printCodeBox(code string, ttlSecs int) {
-	inner := fmt.Sprintf("     %s     ", code)
-	border := strings.Repeat("─", len(inner))
-	pad := strings.Repeat(" ", len(inner))
+	innerText := fmt.Sprintf("     %s     ", code)
+	border := strings.Repeat("─", len(innerText))
+	pad := strings.Repeat(" ", len(innerText))
+	coloredInner := strings.Replace(innerText, code, green(code), 1)
 	fmt.Println()
 	fmt.Printf("   ┌%s┐\n", border)
 	fmt.Printf("   │%s│\n", pad)
-	fmt.Printf("   │%s│\n", inner)
+	fmt.Printf("   │%s│\n", coloredInner)
 	fmt.Printf("   │%s│\n", pad)
 	fmt.Printf("   └%s┘\n", border)
 	fmt.Println()
 	fmt.Println("Share this code with your guest (any channel: phone, chat, in person).")
-	fmt.Printf("Code expires in %d seconds.\n", ttlSecs)
+	fmt.Println(dim(fmt.Sprintf("Code expires in %d seconds.", ttlSecs)))
 	fmt.Println()
 	fmt.Println("Waiting for the guest to connect...")
 }
@@ -375,7 +376,7 @@ func sanitize(s string) string {
 	return b.String()
 }
 
-func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedName string, svcList []shareService, hostID, ca certs.Identity, ttl, maxDuration time.Duration) {
+func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedName string, svcList []shareService, hostID, ca certs.Identity, ttl, maxDuration time.Duration, recordDir string) {
 	cfg, err := certs.ClientTLS(hostID, ca, serverName)
 	check(err)
 
@@ -416,6 +417,7 @@ func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedNa
 	}
 
 	var firstSeen bool
+	var recordHintShown bool
 
 	in := bufio.NewReader(os.Stdin)
 	for {
@@ -437,10 +439,10 @@ func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedNa
 				}
 				warn := ""
 				if !strings.EqualFold(strings.TrimSpace(m.Who), strings.TrimSpace(expectedName)) {
-					warn = "WARNING: name mismatch. "
+					warn = red("WARNING: name mismatch.") + " "
 				}
-				fmt.Printf("\n%s%s (expected: %s) wants access to share %s services: %s. Reason: %s. approve? [y/N] ",
-					warn, sanitize(m.Who), sanitize(expectedName), sanitize(shareID), formatServices(svcList), sanitize(m.Reason))
+				fmt.Printf("\n%s%s (expected: %s) wants access to share %s services: %s. Reason: %s. approve? %s ",
+					warn, sanitize(m.Who), sanitize(expectedName), sanitize(shareID), formatServices(svcList), sanitize(m.Reason), yellow("[y/N]"))
 				line, err := in.ReadString('\n')
 				if err != nil {
 					return
@@ -454,9 +456,14 @@ func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedNa
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
+				if approved && recordDir != "" && !recordHintShown {
+					recordHintShown = true
+					fmt.Println(cyan("session recordings at: " + recordDir))
+					fmt.Println(cyan("  tail -f " + recordDir + "/*.log  for a live view"))
+				}
 			case proto.KindSessionEnded:
 				if firstSeen {
-					fmt.Fprintln(os.Stderr, "session ended; tessera share exiting")
+					fmt.Fprintln(os.Stderr, dim("session ended; tessera share exiting"))
 					return
 				}
 			}

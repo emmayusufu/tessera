@@ -164,7 +164,7 @@ func cmdJoin(args []string) {
 
 	dial := netutil.Dialer(func() (net.Conn, error) { return tls.Dial("tcp", dialAddr, outer) })
 
-	fmt.Printf("Connecting to %s's machine for: %s...\n", bundle.ExpectedName, bundle.Reason)
+	fmt.Printf("Connecting to %s's machine for: %s...\n", cyan(bundle.ExpectedName), dim(bundle.Reason))
 	sessionID, ctl, err := client.Request(dial, who, bundle.ShareID, svc.Target, bundle.Reason)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, joinDialError(err, dialAddr))
@@ -336,13 +336,13 @@ func peekCode(baseURL, code string) (*peekResponse, error) {
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotFound:
-		return nil, errors.New("code not recognized; ask the host to re-run `tessera share`")
+		return nil, errors.New(red("code not recognized; ask the host to re-run `tessera share`"))
 	case http.StatusGone:
-		return nil, errors.New("code already used or expired; ask the host for a new one")
+		return nil, errors.New(red("code already used or expired; ask the host for a new one"))
 	case http.StatusLocked:
-		return nil, errors.New("too many wrong attempts; try again in a few minutes")
+		return nil, errors.New(red("too many wrong attempts; try again in a few minutes"))
 	case http.StatusTooManyRequests:
-		return nil, errors.New("rate limited; wait a moment")
+		return nil, errors.New(red("rate limited; wait a moment"))
 	default:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("peek failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
@@ -371,13 +371,13 @@ func redeem(baseURL, code string) (*redeemResponse, error) {
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotFound:
-		return nil, errors.New("code not recognized; ask the host to re-run `tessera share`")
+		return nil, errors.New(red("code not recognized; ask the host to re-run `tessera share`"))
 	case http.StatusGone:
-		return nil, errors.New("code already used; ask the host for a new one")
+		return nil, errors.New(red("code already used; ask the host for a new one"))
 	case http.StatusLocked:
-		return nil, errors.New("too many wrong attempts; try again in a few minutes")
+		return nil, errors.New(red("too many wrong attempts; try again in a few minutes"))
 	case http.StatusTooManyRequests:
-		return nil, errors.New("rate limited; wait a moment")
+		return nil, errors.New(red("rate limited; wait a moment"))
 	default:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("redeem failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
@@ -455,13 +455,15 @@ func runShellSession(ctx context.Context, dial netutil.Dialer, ctl net.Conn, ses
 	}
 
 	fd := int(os.Stdin.Fd())
-	var restore func()
-	if term.IsTerminal(fd) {
-		st, err := term.MakeRaw(fd)
-		if err == nil {
-			restore = func() { _ = term.Restore(fd, st) }
-			defer restore()
-		}
+	if !term.IsTerminal(fd) {
+		fmt.Fprintln(os.Stderr, yellow("warning: stdin is not a terminal; shell mode requires an interactive session"))
+		return fmt.Errorf("shell: stdin is not a terminal")
+	}
+	st, err := term.MakeRaw(fd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, yellow(fmt.Sprintf("warning: could not set raw mode: %v; output may show duplicated keystrokes", err)))
+	} else {
+		defer func() { _ = term.Restore(fd, st) }()
 	}
 
 	go func() {
