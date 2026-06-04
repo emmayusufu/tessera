@@ -60,6 +60,15 @@ Advanced:
 Run "tessera <command> -h" for command-specific flags and examples.
 `
 
+// helpOK prints top-level help to stdout and exits 0; used for an explicit
+// help/-h/--help request.
+func helpOK() {
+	fmt.Fprint(os.Stdout, topUsage)
+	os.Exit(0)
+}
+
+// usage prints top-level help to stderr and exits 2; used for an unknown
+// command or other invocation error.
 func usage() {
 	fmt.Fprint(os.Stderr, topUsage)
 	os.Exit(2)

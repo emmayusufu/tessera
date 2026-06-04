@@ -44,7 +44,7 @@ func main() {
 	case "version":
 		fmt.Println(version.Version)
 	case "help", "-h", "--help":
-		usage()
+		helpOK()
 	default:
 		usage()
 	}
