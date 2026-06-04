@@ -67,6 +67,16 @@ func cmdJoin(args []string) {
 	local := fs.String("local", "127.0.0.1:13000", "local address to forward from")
 	execCmd := fs.String("exec", "", "shell command to run after the tunnel opens; {port} is replaced with the local port. When the command exits, the tunnel closes.")
 	serviceName := fs.String("service", "", "service name to connect to (required when the share offers more than one)")
+	attachUsage(fs, cmdHelp{
+		summary:  "tessera join: redeem an 8-char share code from a host and connect.",
+		synopsis: "tessera join [flags] CODE",
+		examples: []string{
+			"tessera join ABCD-EFGH",
+			"tessera join -local 127.0.0.1:5432 ABCD-EFGH",
+			"tessera join -service db ABCD-EFGH",
+			"tessera join -exec 'psql -h 127.0.0.1 -p {port}' ABCD-EFGH",
+		},
+	})
 	_ = fs.Parse(args)
 
 	if *baseURL == "" || *coordAddr == "" {

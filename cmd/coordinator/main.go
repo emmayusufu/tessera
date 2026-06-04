@@ -21,6 +21,25 @@ import (
 )
 
 func main() {
+	flag.Usage = func() {
+		out := flag.CommandLine.Output()
+		fmt.Fprintln(out, "coordinator: tessera broker. Accepts agent and guest mTLS connections, hosts the approval")
+		fmt.Fprintln(out, "page, and relays approved sessions as opaque ciphertext (inner TLS terminates at the")
+		fmt.Fprintln(out, "endpoints, not here).")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Usage: coordinator [-listen :8443] [-http :8080] [-base-url URL] [flags]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Flags:")
+		flag.PrintDefaults()
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Environment:")
+		fmt.Fprintln(out, "  TESSERA_OPERATOR_TOKEN   when set, enables the operator revoke endpoint")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Example:")
+		fmt.Fprintln(out, "  coordinator -listen :8443 -http :8080 -base-url https://coord.example.com \\")
+		fmt.Fprintln(out, "    -ca ca.crt -cert coordinator.crt -key coordinator.key \\")
+		fmt.Fprintln(out, "    -http-cert fullchain.pem -http-key privkey.pem")
+	}
 	listenAddr := flag.String("listen", ":8443", "mTLS address for agents and guests")
 	httpAddr := flag.String("http", ":8080", "address for the approval web page")
 	baseURL := flag.String("base-url", "http://localhost:8080", "public URL prefix used in approval links")

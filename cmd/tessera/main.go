@@ -50,15 +50,18 @@ func main() {
 	}
 }
 
-func usage() {
-	fmt.Fprintln(os.Stderr, "usage: tessera <ca|quickstart|connect|share|join|token|link|version> [flags]")
-	os.Exit(2)
-}
-
 func cmdCA(args []string) {
 	fs := flag.NewFlagSet("ca", flag.ExitOnError)
 	host := fs.String("coordinator-name", "localhost", "DNS name on the coordinator certificate")
 	dir := fs.String("out", ".", "directory to write certs into")
+	attachUsage(fs, cmdHelp{
+		summary:  "tessera ca: mint a CA and matching coordinator, agent, and guest certs.",
+		synopsis: "tessera ca [-out DIR] [-coordinator-name NAME]",
+		examples: []string{
+			"tessera ca -out ./certs",
+			"tessera ca -out ./certs -coordinator-name coord.example.com",
+		},
+	})
 	_ = fs.Parse(args)
 
 	ca, err := certs.NewCA()
@@ -90,6 +93,14 @@ func cmdConnect(args []string) {
 	caFile := fs.String("ca", "ca.crt", "CA certificate")
 	certFile := fs.String("cert", "guest.crt", "guest certificate")
 	keyFile := fs.String("key", "guest.key", "guest private key")
+	attachUsage(fs, cmdHelp{
+		summary:  "tessera connect: connect to a known share-id without redeeming a code.",
+		synopsis: "tessera connect -share-id ID -target HOST:PORT [-coordinator HOST:PORT] [flags]",
+		examples: []string{
+			"tessera connect -share-id demo -target 127.0.0.1:5432",
+			"tessera connect -share-id demo -target 127.0.0.1:5432 -local 127.0.0.1:15432",
+		},
+	})
 	_ = fs.Parse(args)
 
 	if *coordAddr == "" {
@@ -144,6 +155,14 @@ func cmdConnect(args []string) {
 func cmdQuickstart(args []string) {
 	fs := flag.NewFlagSet("quickstart", flag.ExitOnError)
 	out := fs.String("out", "", "directory to write certs into (defaults to $XDG_CONFIG_HOME/tessera)")
+	attachUsage(fs, cmdHelp{
+		summary:  "tessera quickstart: mint a CA and host certs in the default config dir (or -out).",
+		synopsis: "tessera quickstart [-out DIR]",
+		examples: []string{
+			"tessera quickstart",
+			"tessera quickstart -out ./certs",
+		},
+	})
 	_ = fs.Parse(args)
 
 	dir := *out

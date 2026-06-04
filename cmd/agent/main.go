@@ -20,6 +20,20 @@ import (
 )
 
 func main() {
+	flag.Usage = func() {
+		out := flag.CommandLine.Output()
+		fmt.Fprintln(out, "agent: long-running side of a Tessera share. Dials the coordinator and serves approved")
+		fmt.Fprintln(out, "guest sessions for one -share-id, scoped to -allow targets.")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Usage: agent -coordinator HOST:PORT -share-id ID -allow host:port[,host:port...] [flags]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Flags:")
+		flag.PrintDefaults()
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Example:")
+		fmt.Fprintln(out, "  agent -coordinator coord.example.com:8443 -share-id demo -allow 127.0.0.1:5432 \\")
+		fmt.Fprintln(out, "    -ca ca.crt -cert agent.crt -key agent.key")
+	}
 	coordAddr := flag.String("coordinator", "", "coordinator mTLS address host:port (required)")
 	serverName := flag.String("server-name", "", "coordinator certificate name (defaults to host part of -coordinator)")
 	shareID := flag.String("share-id", "", "share-id this agent serves (required)")

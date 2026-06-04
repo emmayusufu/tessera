@@ -84,6 +84,14 @@ func cmdLink(args []string) {
 	mtls := fs.String("mtls", "", "coordinator mTLS address host:port")
 	base := fs.String("base-url", "", "coordinator HTTP(S) base URL")
 	dirFlag := fs.String("config-dir", "", "config directory (defaults to $XDG_CONFIG_HOME/tessera)")
+	attachUsage(fs, cmdHelp{
+		summary:  "tessera link: save the coordinator address so share/join can omit it.",
+		synopsis: "tessera link [-mtls HOST:PORT] [-base-url URL]",
+		examples: []string{
+			"tessera link",
+			"tessera link -mtls coord.example.com:8443 -base-url https://coord.example.com",
+		},
+	})
 	_ = fs.Parse(args)
 
 	dir := *dirFlag

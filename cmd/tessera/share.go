@@ -117,6 +117,17 @@ func cmdShare(args []string) {
 	maxDuration := fs.Duration("max-duration", 0, "kill the share session after this wall-clock duration regardless of activity (0 disables)")
 	idleTimeout := fs.Duration("idle-timeout", 30*time.Minute, "close a stream after this much idle time (clamped to [1m, 24h] by the coordinator)")
 	execHint := fs.String("exec-hint", "", "command the guest should run after connecting; {port} is replaced with the guest's local port. Single-service only; for -service use the port-based default. If empty, derived from the target port.")
+	attachUsage(fs, cmdHelp{
+		summary:  "tessera share: offer a port, named service, or interactive shell to a guest.",
+		synopsis: "tessera share (-port N | -target HOST:PORT | -service name=host:port ... | -shell) [flags]",
+		examples: []string{
+			"tessera share -port 5432",
+			"tessera share -port 5432 -reason \"debug auth bug\" -expected-name alice",
+			"tessera share -shell",
+			"tessera share -service db=127.0.0.1:5432 -service cache=127.0.0.1:6379",
+			"tessera share -port 5432 -ttl 120s -idle-timeout 15m",
+		},
+	})
 	_ = fs.Parse(args)
 
 	dir := *configDir

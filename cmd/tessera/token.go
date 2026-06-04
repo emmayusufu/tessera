@@ -12,6 +12,14 @@ import (
 func cmdToken(args []string) {
 	fs := flag.NewFlagSet("token", flag.ExitOnError)
 	dir := fs.String("config-dir", defaultConfigDir(), "directory to write the operator token into")
+	attachUsage(fs, cmdHelp{
+		summary:  "tessera token: save the coordinator operator token used by session revoke.",
+		synopsis: "tessera token [TOKEN]   (omit TOKEN to paste it on stdin)",
+		examples: []string{
+			"tessera token",
+			"tessera token sometokenvalue",
+		},
+	})
 	_ = fs.Parse(args)
 
 	var tok string
