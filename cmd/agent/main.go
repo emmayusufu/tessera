@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/emmayusufu/tessera/internal/agent"
 	"github.com/emmayusufu/tessera/internal/certs"
@@ -84,15 +83,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	for ctx.Err() == nil {
-		if err := ag.Run(ctx); err != nil && ctx.Err() == nil {
-			log.Warn("disconnected, retrying", "err", normalizeErr(err, *coordAddr))
-			select {
-			case <-time.After(3 * time.Second):
-			case <-ctx.Done():
-			}
-		}
-	}
+	agent.RunWithBackoff(ctx, ag)
 }
 
 func normalizeErr(err error, coordAddr string) string {

@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net"
 	"os"
 	"os/exec"
@@ -36,6 +37,33 @@ type Agent struct {
 	// transcripts are written as <session-id>.log. The directory must already
 	// exist; the agent doesn't create it.
 	RecordPath string
+}
+
+// RunWithBackoff calls Run in a loop until ctx is cancelled, sleeping with
+// exponential backoff (1s, 2s, 4s, 8s, capped at 30s) plus light jitter
+// between attempts. Recovers from Wi-Fi flaps and short coordinator hiccups.
+func RunWithBackoff(ctx context.Context, a *Agent) {
+	delay := time.Second
+	for ctx.Err() == nil {
+		err := a.Run(ctx)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		jitter := time.Duration(rand.Int63n(int64(delay)/4+1)) - delay/8
+		wait := delay + jitter
+		if wait < 0 {
+			wait = time.Second
+		}
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return
+		}
+		delay *= 2
+		if delay > 30*time.Second {
+			delay = 30 * time.Second
+		}
+	}
 }
 
 func (a *Agent) Run(ctx context.Context) error {

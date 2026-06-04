@@ -243,13 +243,7 @@ func cmdShare(args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	go func() {
-		for ctx.Err() == nil {
-			if err := ag.Run(ctx); err != nil && ctx.Err() == nil {
-				time.Sleep(2 * time.Second)
-			}
-		}
-	}()
+	go agent.RunWithBackoff(ctx, ag)
 
 	ttlSecs := int(ttl.Seconds())
 	if ttlSecs < 10 {
