@@ -149,7 +149,7 @@ func cmdJoin(args []string) {
 	if defaultWho == "" {
 		defaultWho = "guest"
 	}
-	fmt.Printf("Your name [the host will see this] (%s): ", defaultWho)
+	fmt.Printf("Your name (default: %s, Enter to use it): ", defaultWho)
 	line, err := in.ReadString('\n')
 	check(err)
 	who := strings.TrimSpace(line)

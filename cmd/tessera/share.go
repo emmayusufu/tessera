@@ -470,10 +470,12 @@ func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedNa
 				if approved && recordDir != "" && !recordHintShown {
 					recordHintShown = true
 					fmt.Println(cyan("session recordings at: " + recordDir))
-					fmt.Println(cyan("  tail -f " + recordDir + "/*.log  for a live view"))
+					fmt.Println(dim("── live session ──"))
+					go watchRecordings(ctx, recordDir, time.Now())
 				}
 			case proto.KindSessionEnded:
 				if firstSeen {
+					fmt.Fprint(os.Stderr, "\x1b[0m")
 					fmt.Fprintln(os.Stderr, dim("session ended; tessera share exiting"))
 					return
 				}
