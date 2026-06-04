@@ -1,7 +1,7 @@
 # Tessera
 
-> Status: experimental. It has not had an independent security review. Do not use
-> it to guard production or sensitive systems without one. See [SECURITY.md](SECURITY.md).
+> Status: pre-1.0, no independent security review. Do not use it to guard
+> production or sensitive systems without one. See [SECURITY.md](SECURITY.md).
 
 Tessera is a consent-gated remote access broker. One person (the **guest**) asks
 for temporary access to a system someone else (the **host**) owns. The host

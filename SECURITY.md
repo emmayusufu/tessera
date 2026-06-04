@@ -1,7 +1,7 @@
 # Security
 
-Tessera is experimental and has not had an independent security review. Do not
-use it to guard production or sensitive systems without one.
+Tessera is pre-1.0 and has not had an independent security review. Do not use
+it to guard production or sensitive systems without one.
 
 ## Reporting a vulnerability
 
