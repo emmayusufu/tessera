@@ -431,6 +431,22 @@ func runShellSession(ctx context.Context, dial netutil.Dialer, ctl net.Conn, ses
 		return fmt.Errorf("shell: inner TLS config is required")
 	}
 
+	// Fail fast on a non-TTY stdin BEFORE dialing or handshaking. The agent
+	// uses the 8-byte size header as its spawn signal, so writing it on a
+	// non-TTY join would fork a doomed login+interactive shell on the host
+	// (sourcing the full rc chain) and leave a near-empty recording file.
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		fmt.Fprintln(os.Stderr, yellow("warning: stdin is not a terminal; shell mode requires an interactive session"))
+		return fmt.Errorf("shell: stdin is not a terminal")
+	}
+	st, err := term.MakeRaw(fd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, yellow(fmt.Sprintf("warning: could not set raw mode: %v; output may show duplicated keystrokes", err)))
+	} else {
+		defer func() { _ = term.Restore(fd, st) }()
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -468,18 +484,6 @@ func runShellSession(ctx context.Context, dial netutil.Dialer, ctl net.Conn, ses
 	binary.BigEndian.PutUint32(hdr[4:8], uint32(cols))
 	if _, err := ic.Write(hdr[:]); err != nil {
 		return fmt.Errorf("shell size header: %w", err)
-	}
-
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		fmt.Fprintln(os.Stderr, yellow("warning: stdin is not a terminal; shell mode requires an interactive session"))
-		return fmt.Errorf("shell: stdin is not a terminal")
-	}
-	st, err := term.MakeRaw(fd)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, yellow(fmt.Sprintf("warning: could not set raw mode: %v; output may show duplicated keystrokes", err)))
-	} else {
-		defer func() { _ = term.Restore(fd, st) }()
 	}
 
 	go func() {
