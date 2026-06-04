@@ -156,11 +156,13 @@ type redeemResponseBody struct {
 	ShareID      string              `json:"share_id"`
 	Services     []redeemServiceView `json:"services"`
 	ExpectedName string              `json:"expected_name"`
+	HostName     string              `json:"host_name"`
 	Reason       string              `json:"reason"`
 }
 
 type peekResponseBody struct {
 	ExpectedName string   `json:"expected_name"`
+	HostName     string   `json:"host_name"`
 	Reason       string   `json:"reason"`
 	ServiceNames []string `json:"service_names"`
 	ExpiresAt    string   `json:"expires_at"`
@@ -205,6 +207,7 @@ func (c *Coordinator) handleRedeem(w http.ResponseWriter, r *http.Request) {
 		ShareID:      b.ShareID,
 		Services:     services,
 		ExpectedName: b.ExpectedName,
+		HostName:     b.HostName,
 		Reason:       b.Reason,
 	})
 }
@@ -240,6 +243,7 @@ func (c *Coordinator) handlePeek(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(peekResponseBody{
 		ExpectedName: b.ExpectedName,
+		HostName:     b.HostName,
 		Reason:       b.Reason,
 		ServiceNames: names,
 		ExpiresAt:    b.expiresAt.UTC().Format(time.RFC3339),

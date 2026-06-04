@@ -138,7 +138,7 @@ func cmdConnect(args []string) {
 		fmt.Fprintln(os.Stderr, normalizeErr(err, *shareID, *caFile))
 		os.Exit(1)
 	}
-	fmt.Println("session ended.")
+	fmt.Println(dim("session ended."))
 }
 
 func cmdQuickstart(args []string) {

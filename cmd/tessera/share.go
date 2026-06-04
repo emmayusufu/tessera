@@ -35,6 +35,7 @@ type shareRequest struct {
 	ShareID            string         `json:"share_id"`
 	Services           []shareService `json:"services"`
 	ExpectedName       string         `json:"expected_name"`
+	HostName           string         `json:"host_name"`
 	Reason             string         `json:"reason"`
 	TTLSeconds         int            `json:"ttl_seconds"`
 	IdleTimeoutSeconds int            `json:"idle_timeout_seconds"`
@@ -253,6 +254,15 @@ func cmdShare(args []string) {
 		ttlSecs = 600
 	}
 
+	hostName := os.Getenv("USER")
+	if hostName == "" {
+		if h, err := os.Hostname(); err == nil {
+			hostName = h
+		} else {
+			hostName = "host"
+		}
+	}
+
 	body, err := json.Marshal(shareRequest{
 		CAcert:             string(ca.Cert),
 		GuestCert:          string(guestID.Cert),
@@ -263,6 +273,7 @@ func cmdShare(args []string) {
 		ShareID:            shareID,
 		Services:           svcList,
 		ExpectedName:       *expectedName,
+		HostName:           hostName,
 		Reason:             *reason,
 		TTLSeconds:         ttlSecs,
 		IdleTimeoutSeconds: int(idleTimeout.Seconds()),

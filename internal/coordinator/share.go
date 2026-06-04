@@ -21,6 +21,7 @@ type shareUploadRequest struct {
 	ShareID            string               `json:"share_id"`
 	Services           []shareUploadService `json:"services"`
 	ExpectedName       string               `json:"expected_name"`
+	HostName           string               `json:"host_name"`
 	Reason             string               `json:"reason"`
 	TTLSeconds         int                  `json:"ttl_seconds"`
 	IdleTimeoutSeconds int                  `json:"idle_timeout_seconds"`
@@ -105,6 +106,7 @@ func (c *Coordinator) handleShareUpload(conn net.Conn, m proto.Msg) {
 		ShareID:            req.ShareID,
 		Services:           services,
 		ExpectedName:       req.ExpectedName,
+		HostName:           req.HostName,
 		Reason:             req.Reason,
 		IdleTimeoutSeconds: idle,
 	}

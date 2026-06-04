@@ -46,11 +46,13 @@ type redeemResponse struct {
 	ShareID      string          `json:"share_id"`
 	Services     []redeemService `json:"services"`
 	ExpectedName string          `json:"expected_name"`
+	HostName     string          `json:"host_name"`
 	Reason       string          `json:"reason"`
 }
 
 type peekResponse struct {
 	ExpectedName string   `json:"expected_name"`
+	HostName     string   `json:"host_name"`
 	Reason       string   `json:"reason"`
 	ServiceNames []string `json:"service_names"`
 	ExpiresAt    string   `json:"expires_at"`
@@ -164,7 +166,7 @@ func cmdJoin(args []string) {
 
 	dial := netutil.Dialer(func() (net.Conn, error) { return tls.Dial("tcp", dialAddr, outer) })
 
-	fmt.Printf("Connecting to %s's machine for: %s...\n", cyan(bundle.ExpectedName), dim(bundle.Reason))
+	fmt.Printf("Connecting to %s's machine for: %s...\n", cyan(bundle.HostName), dim(bundle.Reason))
 	sessionID, ctl, err := client.Request(dial, who, bundle.ShareID, svc.Target, bundle.Reason)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, joinDialError(err, dialAddr))
@@ -180,7 +182,7 @@ func cmdJoin(args []string) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Println("session ended.")
+		fmt.Println(dim("session ended."))
 		return
 	}
 
@@ -222,7 +224,7 @@ func cmdJoin(args []string) {
 		stop()
 		<-forwardErrCh
 
-		fmt.Println("session ended.")
+		fmt.Println(dim("session ended."))
 		if runErr != nil {
 			var exitErr *exec.ExitError
 			if errors.As(runErr, &exitErr) {
@@ -238,7 +240,7 @@ func cmdJoin(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Println("session ended.")
+	fmt.Println(dim("session ended."))
 }
 
 func extractPort(local string, ln net.Listener) (string, error) {

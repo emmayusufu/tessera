@@ -32,6 +32,7 @@ type bootstrapBundle struct {
 	ShareID            string
 	Services           []bundleService
 	ExpectedName       string
+	HostName           string
 	Reason             string
 	IdleTimeoutSeconds int
 
