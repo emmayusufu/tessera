@@ -243,6 +243,21 @@ make fmt     # gofmt + goimports
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the toolchain.
 
+### Pre-commit hooks
+
+```bash
+brew install pre-commit          # or: pip install pre-commit
+pre-commit install               # wires .git/hooks/pre-commit
+```
+
+After install, every `git commit` runs gofmt, go vet, go test, plus a few project-specific checks (no em-dashes in tracked files or commit messages, no AI/Claude attribution in commit messages, no work-email leakage).
+
+To run all hooks manually without committing:
+
+```bash
+pre-commit run --all-files
+```
+
 ## License
 
 MIT
