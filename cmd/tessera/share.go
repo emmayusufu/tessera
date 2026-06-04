@@ -42,9 +42,9 @@ type shareRequest struct {
 }
 
 type shareService struct {
-	Name     string `json:"name"`
-	Target   string `json:"target"`
-	ExecHint string `json:"exec_hint,omitempty"`
+	Name   string `json:"name"`
+	Target string `json:"target"`
+	Kind   string `json:"kind,omitempty"`
 }
 
 // flagSlice collects repeated string flags so callers can pass -service multiple times.
@@ -53,51 +53,36 @@ type flagSlice []string
 func (f *flagSlice) String() string     { return strings.Join(*f, ",") }
 func (f *flagSlice) Set(v string) error { *f = append(*f, v); return nil }
 
-// parseServiceFlag splits a "name=host:port" value. Whitespace around the name
-// and target is trimmed; the host:port is validated.
+// parseServiceFlag splits a "name=host:port[@kind]" value. If @kind is
+// omitted, the kind is inferred from the port. Whitespace around each part
+// is trimmed; the host:port is validated; unknown kinds error out so a typo
+// fails loud instead of silently degrading to generic-tcp.
 func parseServiceFlag(raw string) (shareService, error) {
 	eq := strings.IndexByte(raw, '=')
 	if eq <= 0 {
-		return shareService{}, fmt.Errorf("service %q must be name=host:port", raw)
+		return shareService{}, fmt.Errorf("service %q must be name=host:port[@kind]", raw)
 	}
 	name := strings.TrimSpace(raw[:eq])
-	target := strings.TrimSpace(raw[eq+1:])
-	if name == "" || target == "" {
-		return shareService{}, fmt.Errorf("service %q must be name=host:port", raw)
+	rest := strings.TrimSpace(raw[eq+1:])
+	if name == "" || rest == "" {
+		return shareService{}, fmt.Errorf("service %q must be name=host:port[@kind]", raw)
+	}
+	target := rest
+	kind := ""
+	if at := strings.IndexByte(rest, '@'); at >= 0 {
+		target = strings.TrimSpace(rest[:at])
+		kind = strings.TrimSpace(rest[at+1:])
+		if !isValidKind(kind) {
+			return shareService{}, fmt.Errorf("service %q: unknown kind %q (want one of %s)", raw, kind, kindList)
+		}
 	}
 	if _, _, err := net.SplitHostPort(target); err != nil {
 		return shareService{}, fmt.Errorf("service %q: bad target: %w", raw, err)
 	}
-	return shareService{Name: name, Target: target}, nil
-}
-
-// deriveExecHint guesses a sensible guest-side command from a host:port target
-// so the guest does not have to remember the protocol. The returned string may
-// contain "{port}" which the guest substitutes with its local forwarded port.
-func deriveExecHint(target string) string {
-	_, p, err := net.SplitHostPort(target)
-	if err != nil {
-		return ""
+	if kind == "" {
+		kind = inferKindFromTarget(target)
 	}
-	switch p {
-	case "22":
-		user := os.Getenv("USER")
-		if user == "" {
-			user = "root"
-		}
-		return "ssh " + user + "@127.0.0.1 -p {port}"
-	case "5432":
-		return "psql -h 127.0.0.1 -p {port}"
-	case "3306":
-		return "mysql -h 127.0.0.1 -P {port} -u root"
-	case "6379":
-		return "redis-cli -p {port}"
-	case "27017":
-		return "mongosh mongodb://127.0.0.1:{port}"
-	case "80", "443", "3000", "8000", "8080":
-		return "open http://127.0.0.1:{port}"
-	}
-	return ""
+	return shareService{Name: name, Target: target, Kind: kind}, nil
 }
 
 func cmdShare(args []string) {
@@ -105,7 +90,7 @@ func cmdShare(args []string) {
 	port := fs.Int("port", 0, "local port to forward; sets target to 127.0.0.1:<port>")
 	target := fs.String("target", "", "host:port the guest will reach (alternative to -port)")
 	var services flagSlice
-	fs.Var(&services, "service", "named service to share, repeatable: -service name=host:port")
+	fs.Var(&services, "service", "named service to share, repeatable: -service name=host:port[@kind]")
 	shell := fs.Bool("shell", false, "share an interactive shell on this host (PTY) instead of forwarding a port")
 	noRecord := fs.Bool("no-record", false, "with -shell, disable session recording")
 	reason := fs.String("reason", "", "reason shown to the host")
@@ -116,15 +101,15 @@ func cmdShare(args []string) {
 	ttl := fs.Duration("ttl", 90*time.Second, "share code TTL")
 	maxDuration := fs.Duration("max-duration", 0, "kill the share session after this wall-clock duration regardless of activity (0 disables)")
 	idleTimeout := fs.Duration("idle-timeout", 30*time.Minute, "close a stream after this much idle time (clamped to [1m, 24h] by the coordinator)")
-	execHint := fs.String("exec-hint", "", "command the guest should run after connecting; {port} is replaced with the guest's local port. Single-service only; for -service use the port-based default. If empty, derived from the target port.")
+	kindFlag := fs.String("kind", "", "service kind for -port/-target (one of "+kindList+"); inferred from the port when empty. For -service use name=host:port@kind.")
 	attachUsage(fs, cmdHelp{
 		summary:  "tessera share: offer a port, named service, or interactive shell to a guest.",
-		synopsis: "tessera share (-port N | -target HOST:PORT | -service name=host:port ... | -shell) [flags]",
+		synopsis: "tessera share (-port N | -target HOST:PORT | -service name=host:port[@kind] ... | -shell) [flags]",
 		examples: []string{
 			"tessera share -port 5432",
-			"tessera share -port 5432 -reason \"debug auth bug\" -expected-name alice",
+			"tessera share -port 5433 -kind postgres -reason \"debug auth bug\" -expected-name alice",
 			"tessera share -shell",
-			"tessera share -service db=127.0.0.1:5432 -service cache=127.0.0.1:6379",
+			"tessera share -service db=127.0.0.1:5433@postgres -service cache=127.0.0.1:6379",
 			"tessera share -port 5432 -ttl 120s -idle-timeout 15m",
 		},
 	})
@@ -143,6 +128,10 @@ func cmdShare(args []string) {
 		fmt.Fprintln(os.Stderr, "share: -coordinator is required (run `tessera link` once to save it)")
 		os.Exit(2)
 	}
+	if *kindFlag != "" && !isValidKind(*kindFlag) {
+		fmt.Fprintf(os.Stderr, "share: -kind must be one of %s (got %q)\n", kindList, *kindFlag)
+		os.Exit(2)
+	}
 	var svcList []shareService
 	switch {
 	case *shell:
@@ -150,14 +139,18 @@ func cmdShare(args []string) {
 			fmt.Fprintln(os.Stderr, "share: -shell cannot be combined with -port, -target, or -service")
 			os.Exit(2)
 		}
-		if *execHint != "" {
-			fmt.Fprintln(os.Stderr, "share: -exec-hint is not used with -shell")
+		if *kindFlag != "" {
+			fmt.Fprintln(os.Stderr, "share: -kind is not used with -shell")
 			os.Exit(2)
 		}
-		svcList = []shareService{{Name: "shell", Target: "shell"}}
+		svcList = []shareService{{Name: "shell", Target: "shell", Kind: KindShell}}
 	case len(services) > 0:
 		if *port != 0 || *target != "" {
 			fmt.Fprintln(os.Stderr, "share: -service cannot be combined with -port or -target")
+			os.Exit(2)
+		}
+		if *kindFlag != "" {
+			fmt.Fprintln(os.Stderr, "share: -kind is single-target only; for -service use name=host:port@kind")
 			os.Exit(2)
 		}
 		for _, raw := range services {
@@ -166,15 +159,7 @@ func cmdShare(args []string) {
 				fmt.Fprintln(os.Stderr, "share:", err)
 				os.Exit(2)
 			}
-			s.ExecHint = deriveExecHint(s.Target)
 			svcList = append(svcList, s)
-		}
-		if len(svcList) > 1 && *execHint != "" {
-			fmt.Fprintln(os.Stderr, "share: -exec-hint is only supported with a single service")
-			os.Exit(2)
-		}
-		if len(svcList) == 1 && *execHint != "" {
-			svcList[0].ExecHint = *execHint
 		}
 	default:
 		resolvedTarget := *target
@@ -185,11 +170,11 @@ func cmdShare(args []string) {
 			}
 			resolvedTarget = fmt.Sprintf("127.0.0.1:%d", *port)
 		}
-		hint := *execHint
-		if hint == "" {
-			hint = deriveExecHint(resolvedTarget)
+		kind := *kindFlag
+		if kind == "" {
+			kind = inferKindFromTarget(resolvedTarget)
 		}
-		svcList = []shareService{{Name: "default", Target: resolvedTarget, ExecHint: hint}}
+		svcList = []shareService{{Name: "default", Target: resolvedTarget, Kind: kind}}
 	}
 	allowed := make([]string, 0, len(svcList))
 	for _, s := range svcList {

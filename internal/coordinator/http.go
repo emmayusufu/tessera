@@ -141,9 +141,9 @@ func (c *Coordinator) handleRevoke(w http.ResponseWriter, r *http.Request) {
 }
 
 type redeemServiceView struct {
-	Name     string `json:"name"`
-	Target   string `json:"target"`
-	ExecHint string `json:"exec_hint,omitempty"`
+	Name   string `json:"name"`
+	Target string `json:"target"`
+	Kind   string `json:"kind,omitempty"`
 }
 
 type redeemResponseBody struct {

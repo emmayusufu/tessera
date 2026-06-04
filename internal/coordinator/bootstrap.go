@@ -17,9 +17,9 @@ import (
 const bootstrapAlphabet = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 type bundleService struct {
-	Name     string
-	Target   string
-	ExecHint string
+	Name   string
+	Target string
+	Kind   string
 }
 
 type bootstrapBundle struct {

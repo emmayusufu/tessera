@@ -28,9 +28,9 @@ type shareUploadRequest struct {
 }
 
 type shareUploadService struct {
-	Name     string `json:"name"`
-	Target   string `json:"target"`
-	ExecHint string `json:"exec_hint,omitempty"`
+	Name   string `json:"name"`
+	Target string `json:"target"`
+	Kind   string `json:"kind,omitempty"`
 }
 
 func (c *Coordinator) handleShareUpload(conn net.Conn, m proto.Msg) {

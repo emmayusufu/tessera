@@ -31,9 +31,9 @@ import (
 )
 
 type redeemService struct {
-	Name     string `json:"name"`
-	Target   string `json:"target"`
-	ExecHint string `json:"exec_hint,omitempty"`
+	Name   string `json:"name"`
+	Target string `json:"target"`
+	Kind   string `json:"kind,omitempty"`
 }
 
 type redeemResponse struct {
@@ -205,11 +205,10 @@ func cmdJoin(args []string) {
 	fmt.Printf("approved. forwarding %s -> %s [%s] (Ctrl-C to end)\n", *local, svc.Target, svc.Name)
 
 	localPort, portErr := extractPort(*local, ln)
-	if *execCmd == "" && svc.ExecHint != "" {
-		*execCmd = svc.ExecHint
-	}
-	if *execCmd == "" && portErr == nil && strings.HasSuffix(svc.Target, ":22") {
-		fmt.Printf("Hint: ssh user@127.0.0.1 -p %s\n", localPort)
+	if *execCmd == "" && portErr == nil {
+		if hint := renderConnectHint(svc.Kind); hint != "" {
+			fmt.Printf("%s: %s\n", hintLabel(svc.Kind), strings.ReplaceAll(hint, "{port}", localPort))
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
