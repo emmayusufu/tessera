@@ -21,8 +21,7 @@ not a multi-tenant SaaS, and it is not a compliance product.
 - Opportunistic internet scanners. The host opens no inbound ports; all
   traffic is dialed out to the coordinator.
 - A guest who has the share-id and the connect command but no approval.
-  Every session needs a fresh tap from the host.
-- A guest who has a leaked approval URL but no live approver session.
+  Every session needs a fresh y/n from the host at their terminal.
 - A coordinator operator who can see traffic content. They cannot. The
   inner TLS terminates at the guest and the agent, so the relay sees
   only ciphertext.
@@ -49,9 +48,15 @@ This is a known, reviewed pattern, not a novel design.
 
 ## Known limitations
 
-- The approval API has no operator authentication. The approval link is a bearer
-  capability, so deliver it over a trusted channel and serve the approval page
-  over HTTPS.
+- Approval is in-terminal only. The host must be at the terminal running
+  `tessera share` during the approval window. If they walk away, the guest's
+  request times out. There is intentionally no out-of-band approval channel
+  (no web page, no SMS link); adding one would reintroduce an HTTP attack
+  surface on the trust gate.
+- The bootstrap redeem/peek endpoints serve over plain HTTP unless
+  `-http-cert`/`-http-key` are set. The redeem response carries a guest
+  private key, so HTTPS is recommended in production. Plain HTTP is fine for
+  local testing.
 - Coordinator state is in memory. A restart drops pending requests and live
   sessions.
 - One CA with no revocation list. Removing a guest's access means rotating

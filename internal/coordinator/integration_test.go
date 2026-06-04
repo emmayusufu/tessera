@@ -59,7 +59,7 @@ func newEnv(t *testing.T) *env {
 	must(t, err)
 	t.Cleanup(func() { log.Close() })
 
-	coord := coordinator.New(log, "http://test", func() (net.Listener, error) { return tlsln, nil })
+	coord := coordinator.New(log, func() (net.Listener, error) { return tlsln, nil })
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go coord.Serve(ctx, "127.0.0.1:0", "", "")

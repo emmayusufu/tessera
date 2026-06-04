@@ -54,20 +54,21 @@ until the host approves a specific request.
 ```mermaid
 flowchart LR
     CLI["tessera (guest CLI)"]
-    CO["coordinator<br/>+ approval page"]
+    CO["coordinator<br/>(broker)"]
     AG["agent"]
     RES[("host resource<br/>db / web / rdp")]
-    H(("host<br/>phone or laptop"))
+    H(("host terminal"))
 
     CLI -- "mTLS" --> CO
     AG -- "mTLS, dials out" --> CO
     AG --> RES
-    H -- "taps Approve" --> CO
+    H -- "types y/n at the prompt" --> CO
 ```
 
 - **coordinator**: runs on a public host. Accepts mutual-TLS connections from
-  agents and guests, serves the approval page, relays approved streams,
-  writes the audit log. Opens no access on its own.
+  agents and guests, relays approved streams (as opaque ciphertext, since
+  inner TLS terminates at the endpoints), and writes the audit log. Opens
+  no access on its own.
 - **agent**: runs on the host's side as a background service. Dials out
   to the coordinator and waits. Accepts nothing inbound. On an approved stream
   it connects to the approved local `host:port` and pipes.
@@ -86,8 +87,8 @@ sequenceDiagram
 
     A->>K: register (dials out)
     G->>K: request access (target, reason)
-    K-->>H: approval link
-    H->>K: Approve
+    K-->>H: prompt over mTLS (tessera share)
+    H->>K: y / n at the terminal
     K-->>G: approved + session
     G->>K: open stream (session)
     K->>A: open data (target)
@@ -112,13 +113,15 @@ cd bin
 # 1. generate a CA and certs (coordinator name = localhost for local testing)
 ./tessera ca --coordinator-name localhost
 
-# 2. start the broker (mTLS on :8443, approval page on :8080)
-./coordinator -listen :8443 -http :8080 -base-url http://localhost:8080 &
+# 2. start the broker (mTLS on :8443, redeem/peek HTTP on :8080)
+./coordinator -listen :8443 -http :8080 &
 
 # 3. run an agent for share-id "demo", allowed to reach a local service
 ./agent -coordinator localhost:8443 -share-id demo -allow 127.0.0.1:5432 &
 
-# 4. request access; the coordinator logs an approval URL, open it and tap Approve
+# 4. request access. The host approves at their terminal (tessera share prints
+#    the prompt; type y to approve). For this single-binary demo, you can
+#    simulate approval by running tessera share on the same machine.
 ./tessera connect -coordinator localhost:8443 -share-id demo \
   -target 127.0.0.1:5432 -reason "troubleshoot" -local 127.0.0.1:15432
 
@@ -148,26 +151,27 @@ docker run --rm -v "$PWD:/work" -w /work --entrypoint /usr/local/bin/tessera \
   tessera ca --coordinator-name tessera.example.org
 cd ..
 
-# Edit docker-compose.yml: set -base-url to your public URL,
-# add HTTPS / operator-token lines as needed.
+# Edit docker-compose.yml to add HTTPS / operator-token lines as needed.
 
 docker compose up -d
 docker compose logs -f coordinator
 ```
 
 The compose file mounts `./certs/` read-only and keeps the audit log in a named
-volume. For HTTPS, mount your Let's Encrypt directory and add the `-http-cert`
-/ `-http-key` flags to the command list.
+volume. For HTTPS on the redeem/peek endpoints (recommended in production so
+the guest's private key stays confidential in transit), mount your Let's
+Encrypt directory and add the `-http-cert` / `-http-key` flags to the command
+list.
 
 ### Run the bare binary
 
 ```bash
-./coordinator -base-url https://tessera.example.org \
-  -http-cert fullchain.pem -http-key privkey.pem
+./coordinator -http-cert fullchain.pem -http-key privkey.pem
 ```
 
-The coordinator logs the approval URL on every request. Route it to the host
-(Slack, iMessage, email, whatever you already use) so they can tap Approve.
+The host approves at their terminal where `tessera share` is running: every
+inbound request prints a prompt and waits for `y` or `n`. No web page, no
+out-of-band link.
 
 Require an operator token for operator actions (revoke). Generate one when you
 deploy the coordinator, then save it once on the host:
@@ -189,9 +193,10 @@ When no token is configured on the coordinator, revoke is disabled.
 ### What's not covered
 
 You still need a public host (a $5 VPS is fine), a DNS A record pointing at it,
-open inbound ports 8443 and 8080 (or 443) on its firewall, and a TLS cert for
-the approval page if you want HTTPS. Docker doesn't change any of that. It just
-makes "run the coordinator process" boring.
+open inbound ports 8443 and 8080 on its firewall, and a TLS cert for the HTTP
+endpoints if you want HTTPS (recommended in production to keep the redeem
+response, which carries a guest private key, confidential in transit). Docker
+doesn't change any of that. It just makes "run the coordinator process" boring.
 
 ## What's enforced
 
@@ -202,9 +207,9 @@ makes "run the coordinator process" boring.
   directly through the coordinator, which relays only ciphertext (a test asserts
   a plaintext marker never appears on the relay path).
 - The agent only reaches targets on its `-allow` list, which is required.
-- The approval link carries a secret token, separate from the request ID that
-  appears in logs, so a leaked ID alone cannot approve. Operator actions (revoke)
-  require an operator bearer token.
+- Approval happens at the host's terminal over the same mTLS channel that
+  carries everything else. There is no web endpoint to phish or MITM. Operator
+  actions (revoke) require an operator bearer token.
 
 ## How it compares
 
@@ -219,18 +224,19 @@ edition split before relying on that distinction.
 ## Status
 
 v1: generic TCP forward to one approved `host:port` (covers a database, an
-internal web portal, an RDP desktop), request, approve-by-web-link, mutual
-revoke, audit log.
+internal web portal, an RDP desktop) or interactive shell, request,
+approve-at-terminal, mutual revoke, audit log.
 
-Not yet built: SSH-shell sharing, replayable session recording, RBAC, persistence.
+Not yet built: replayable session recording, RBAC, persistence.
 
 ## Security note
 
 Tessera only makes sense as a consent-based tool: the host always approves,
 access is scoped to a session, and everything is audited. It is not a backdoor.
-The approval link is a bearer capability, so deliver it over a trusted channel
-and serve the approval page over HTTPS (`-http-cert`/`-http-key`). For
-production use guarding real systems, get the design security-reviewed first.
+Serve the redeem/peek endpoints over HTTPS (`-http-cert`/`-http-key`) in
+production so the guest's bundle (which contains a private key) is not
+sniffable in transit. For real production use, get the design
+security-reviewed first.
 
 ## Develop
 

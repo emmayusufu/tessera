@@ -23,11 +23,11 @@ import (
 func main() {
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
-		fmt.Fprintln(out, "coordinator: tessera broker. Accepts agent and guest mTLS connections, hosts the approval")
-		fmt.Fprintln(out, "page, and relays approved sessions as opaque ciphertext (inner TLS terminates at the")
-		fmt.Fprintln(out, "endpoints, not here).")
+		fmt.Fprintln(out, "coordinator: tessera broker. Accepts agent and guest mTLS connections and serves")
+		fmt.Fprintln(out, "the bootstrap redeem/peek endpoints over HTTP. Relays approved sessions as opaque")
+		fmt.Fprintln(out, "ciphertext (inner TLS terminates at the endpoints, not here).")
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Usage: coordinator [-listen :8443] [-http :8080] [-base-url URL] [flags]")
+		fmt.Fprintln(out, "Usage: coordinator [-listen :8443] [-http :8080] [flags]")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Flags:")
 		flag.PrintDefaults()
@@ -36,18 +36,17 @@ func main() {
 		fmt.Fprintln(out, "  TESSERA_OPERATOR_TOKEN   when set, enables the operator revoke endpoint")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Example:")
-		fmt.Fprintln(out, "  coordinator -listen :8443 -http :8080 -base-url https://coord.example.com \\")
+		fmt.Fprintln(out, "  coordinator -listen :8443 -http :8080 \\")
 		fmt.Fprintln(out, "    -ca ca.crt -cert coordinator.crt -key coordinator.key \\")
 		fmt.Fprintln(out, "    -http-cert fullchain.pem -http-key privkey.pem")
 	}
 	listenAddr := flag.String("listen", ":8443", "mTLS address for agents and guests")
-	httpAddr := flag.String("http", ":8080", "address for the approval web page")
-	baseURL := flag.String("base-url", "http://localhost:8080", "public URL prefix used in approval links")
+	httpAddr := flag.String("http", ":8080", "address for the bootstrap redeem/peek and operator revoke endpoints")
 	caFile := flag.String("ca", "ca.crt", "CA certificate")
 	certFile := flag.String("cert", "coordinator.crt", "coordinator certificate")
 	keyFile := flag.String("key", "coordinator.key", "coordinator private key")
-	httpCert := flag.String("http-cert", "", "TLS certificate for the approval page (enables HTTPS)")
-	httpKey := flag.String("http-key", "", "TLS key for the approval page")
+	httpCert := flag.String("http-cert", "", "TLS certificate for the HTTP endpoints (enables HTTPS)")
+	httpKey := flag.String("http-key", "", "TLS key for the HTTP endpoints")
 	auditFile := flag.String("audit", "tessera-audit.jsonl", "append-only audit log path")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
@@ -83,7 +82,7 @@ func main() {
 	defer auditLog.Close()
 
 	listen := func() (net.Listener, error) { return tls.Listen("tcp", *listenAddr, tlsConf) }
-	coord := coordinator.New(auditLog, *baseURL, listen)
+	coord := coordinator.New(auditLog, listen)
 
 	if opToken := os.Getenv("TESSERA_OPERATOR_TOKEN"); opToken != "" {
 		coord.SetOperatorToken(opToken)

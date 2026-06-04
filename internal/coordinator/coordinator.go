@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -52,7 +51,6 @@ type decision struct {
 
 type request struct {
 	id      string
-	token   string
 	shareID string
 	target  string
 	reason  string
@@ -107,7 +105,6 @@ func (s *session) end() []net.Conn {
 type Coordinator struct {
 	auditLog      *audit.Log
 	logger        *slog.Logger
-	baseURL       string
 	listen        func() (net.Listener, error)
 	operatorToken string
 
@@ -123,11 +120,10 @@ type Coordinator struct {
 	bootstrap       *bootstrapStore
 }
 
-func New(log *audit.Log, baseURL string, listen func() (net.Listener, error)) *Coordinator {
+func New(log *audit.Log, listen func() (net.Listener, error)) *Coordinator {
 	c := &Coordinator{
 		auditLog:        log,
 		logger:          slog.Default(),
-		baseURL:         baseURL,
 		listen:          listen,
 		agents:          map[string]*agentConn{},
 		requests:        map[string]*request{},
@@ -186,9 +182,11 @@ func (c *Coordinator) checkOrPinShare(shareID, fp string) bool {
 	return pinned == fp
 }
 
-// Serve accepts agent and guest connections and serves the approval API on
-// httpAddr. If certFile and keyFile are set, the approval API is served over
-// HTTPS. It blocks until ctx is cancelled.
+// Serve accepts agent and guest connections on the mTLS listener and serves
+// the bootstrap redeem/peek and operator revoke endpoints on httpAddr. If
+// certFile and keyFile are set, the HTTP endpoints are served over HTTPS so
+// the redeem response (which contains a guest private key) stays confidential.
+// It blocks until ctx is cancelled.
 func (c *Coordinator) Serve(ctx context.Context, httpAddr, certFile, keyFile string) error {
 	ln, err := c.listen()
 	if err != nil {
@@ -303,7 +301,6 @@ func (c *Coordinator) handleRequest(conn net.Conn, m proto.Msg) {
 
 	req := &request{
 		id:      newID(),
-		token:   newID(),
 		shareID: m.ShareID,
 		target:  m.Target,
 		reason:  m.Reason,
@@ -316,10 +313,9 @@ func (c *Coordinator) handleRequest(conn net.Conn, m proto.Msg) {
 	c.requests[req.id] = req
 	c.mu.Unlock()
 
-	approveURL := fmt.Sprintf("%s/a/%s#t=%s", c.baseURL, req.id, req.token)
-	_ = c.auditLog.Write(audit.Event{Kind: "request", RequestID: req.id, ShareID: req.shareID, Who: req.who, Target: req.target, Reason: req.reason, Token: req.token})
+	_ = c.auditLog.Write(audit.Event{Kind: "request", RequestID: req.id, ShareID: req.shareID, Who: req.who, Target: req.target, Reason: req.reason})
 	c.logger.Info("access requested",
-		"request", req.id, "share_id", req.shareID, "who", req.who, "target", req.target, "approve_url", approveURL)
+		"request", req.id, "share_id", req.shareID, "who", req.who, "target", req.target)
 	c.fanoutPrompt(req)
 
 	var d decision

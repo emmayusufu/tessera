@@ -13,7 +13,6 @@ services:
     command:
       - "-listen=:8443"
       - "-http=:8080"
-      - "-base-url=http://localhost:8080"
       - "-ca=/etc/tessera/certs/ca.crt"
       - "-cert=/etc/tessera/certs/coordinator.crt"
       - "-key=/etc/tessera/certs/coordinator.key"

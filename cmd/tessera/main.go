@@ -200,7 +200,7 @@ func cmdQuickstart(args []string) {
 	fmt.Printf("wrote certs to %s\n", dir)
 	fmt.Println("share-id: demo")
 	fmt.Println("next step:")
-	fmt.Printf("  ./coordinator -listen :8443 -http :8080 -base-url http://localhost:8080 \\\n"+
+	fmt.Printf("  ./coordinator -listen :8443 -http :8080 \\\n"+
 		"    -ca %s/ca.crt -cert %s/coordinator.crt -key %s/coordinator.key\n", dir, dir, dir)
 	fmt.Printf("  ./agent -coordinator localhost:8443 -share-id demo \\\n"+
 		"    -allow 127.0.0.1:5432 -ca %s/ca.crt -cert %s/agent.crt -key %s/agent.key\n", dir, dir, dir)
