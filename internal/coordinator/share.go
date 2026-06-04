@@ -64,7 +64,7 @@ func (c *Coordinator) handleShareUpload(conn net.Conn, m proto.Msg) {
 			return
 		}
 		seen[svc.Name] = struct{}{}
-		services = append(services, bundleService{Name: svc.Name, Target: svc.Target, ExecHint: svc.ExecHint})
+		services = append(services, bundleService(svc))
 	}
 
 	c.mu.Lock()

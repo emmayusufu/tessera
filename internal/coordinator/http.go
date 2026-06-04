@@ -192,7 +192,7 @@ func (c *Coordinator) handleRedeem(w http.ResponseWriter, r *http.Request) {
 	}
 	services := make([]redeemServiceView, 0, len(b.Services))
 	for _, s := range b.Services {
-		services = append(services, redeemServiceView{Name: s.Name, Target: s.Target, ExecHint: s.ExecHint})
+		services = append(services, redeemServiceView(s))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(redeemResponseBody{
