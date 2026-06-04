@@ -467,6 +467,10 @@ func approveLoop(ctx context.Context, coordAddr, serverName, shareID, expectedNa
 					fmt.Fprintln(os.Stderr, err)
 					return
 				}
+				if !approved {
+					fmt.Fprintln(os.Stderr, yellow("request denied; tessera share exiting"))
+					return
+				}
 				if approved && recordDir != "" && !recordHintShown {
 					recordHintShown = true
 					fmt.Println(cyan("session recordings at: " + recordDir))
