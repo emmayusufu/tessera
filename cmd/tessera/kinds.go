@@ -19,6 +19,9 @@ const (
 	KindGenericTCP = "generic-tcp"
 )
 
+// validKinds is the set accepted on the -kind flag and the @kind suffix.
+// KindShell is deliberately excluded: it's set internally by the -shell flag
+// path and by inferKindFromTarget("shell"), never by user-supplied input.
 var validKinds = map[string]struct{}{
 	KindPostgres:   {},
 	KindMySQL:      {},
@@ -26,7 +29,6 @@ var validKinds = map[string]struct{}{
 	KindMongoDB:    {},
 	KindSSH:        {},
 	KindHTTP:       {},
-	KindShell:      {},
 	KindGenericTCP: {},
 }
 
