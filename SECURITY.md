@@ -31,7 +31,10 @@ not a multi-tenant SaaS, and it is not a compliance product.
 ### What it does NOT defend against
 
 - A phished or socially-engineered host. No protocol stops "the human
-  said yes."
+  said yes." Approval is in-terminal where the host can read who is
+  asking, what target, and why; the protocol presents the request
+  honestly, but a host who skims the prompt and types `y` to anything
+  is the weakest link, and Tessera does not try to be smarter than them.
 - A compromised guest laptop. Their key, their session.
 - A rooted coordinator host. Plaintext sits at the outer TLS seam there,
   and a root user can rewrite the audit log.
