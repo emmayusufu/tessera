@@ -37,7 +37,23 @@ func Open(path string) (*Log, error) {
 	return &Log{f: f, now: time.Now}, nil
 }
 
+// fieldMax bounds each user-controllable field so a peer can't bloat the
+// audit log by passing huge -reason / target / who / detail values.
+const fieldMax = 256
+
+func capField(s string) string {
+	if len(s) <= fieldMax {
+		return s
+	}
+	return s[:fieldMax] + "..."
+}
+
 func (l *Log) Write(e Event) error {
+	e.Who = capField(e.Who)
+	e.Target = capField(e.Target)
+	e.Reason = capField(e.Reason)
+	e.Detail = capField(e.Detail)
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	e.Time = l.now()

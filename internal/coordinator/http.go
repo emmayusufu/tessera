@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/emmayusufu/tessera/internal/audit"
 )
 
 func (c *Coordinator) httpMux() *http.ServeMux {
@@ -34,18 +36,43 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-func (c *Coordinator) handleRevoke(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !c.rl.ipAllow(clientIP(r)) {
+// rlGate enforces both the per-IP rate limit and the per-ID lockout in one
+// call. On denial it writes a rate_limit_trip audit entry naming the handler,
+// the limit that fired, and the requesting IP, then sends the appropriate
+// HTTP status and returns false. Handlers should early-return on false.
+func (c *Coordinator) rlGate(w http.ResponseWriter, r *http.Request, id, handler string) bool {
+	ip := clientIP(r)
+	if !c.rl.ipAllow(ip) {
+		_ = c.auditLog.Write(audit.Event{
+			Kind:   "rate_limit_trip",
+			Detail: handler + ":ip:" + ip,
+		})
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
-		return
+		return false
 	}
 	if c.rl.idLocked(id) {
+		_ = c.auditLog.Write(audit.Event{
+			Kind:   "rate_limit_trip",
+			Detail: handler + ":id_locked:" + ip,
+		})
 		http.Error(w, "locked: too many attempts", http.StatusLocked)
+		return false
+	}
+	return true
+}
+
+func (c *Coordinator) handleRevoke(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !c.rlGate(w, r, id, "revoke") {
 		return
 	}
 	if !c.operatorOK(r) {
 		c.rl.idFail(id)
+		_ = c.auditLog.Write(audit.Event{
+			Kind:      "operator_auth_failed",
+			SessionID: id,
+			Detail:    "revoke:" + clientIP(r),
+		})
 		http.Error(w, "operator authentication required", http.StatusForbidden)
 		return
 	}
@@ -90,12 +117,7 @@ type peekResponseBody struct {
 func (c *Coordinator) handleRedeem(w http.ResponseWriter, r *http.Request) {
 	code := r.PathValue("code")
 	normalized := normalizeCode(code)
-	if !c.rl.ipAllow(clientIP(r)) {
-		http.Error(w, "rate limited", http.StatusTooManyRequests)
-		return
-	}
-	if c.rl.idLocked(normalized) {
-		http.Error(w, "locked: too many attempts", http.StatusLocked)
+	if !c.rlGate(w, r, normalized, "redeem") {
 		return
 	}
 	b, found, used := c.bootstrap.Redeem(normalized)
@@ -134,12 +156,7 @@ func (c *Coordinator) handleRedeem(w http.ResponseWriter, r *http.Request) {
 func (c *Coordinator) handlePeek(w http.ResponseWriter, r *http.Request) {
 	code := r.PathValue("code")
 	normalized := normalizeCode(code)
-	if !c.rl.ipAllow(clientIP(r)) {
-		http.Error(w, "rate limited", http.StatusTooManyRequests)
-		return
-	}
-	if c.rl.idLocked(normalized) {
-		http.Error(w, "locked: too many attempts", http.StatusLocked)
+	if !c.rlGate(w, r, normalized, "peek") {
 		return
 	}
 	b, found, used := c.bootstrap.Peek(normalized)
