@@ -99,21 +99,43 @@ func (s *bootstrapStore) Put(b *bootstrapBundle, ttl time.Duration) (string, str
 	return code, canonical, b.expiresAt, nil
 }
 
-// Peek returns the bundle without consuming it. Used by the guest CLI to fetch
-// the services list before the user commits to redeeming the one-shot code.
-func (s *bootstrapStore) Peek(code string) (*bootstrapBundle, bool, bool) {
+// peekView is the metadata subset returned by Peek. It deliberately omits
+// the CA cert, the guest cert, the guest private key, and the coordinator
+// address: those are only handed out at Redeem time, against a one-shot
+// code, so a caller polling Peek can never extract a guest credential.
+type peekView struct {
+	ShareID      string
+	ExpectedName string
+	HostName     string
+	Reason       string
+	Services     []bundleService
+	ExpiresAt    time.Time
+}
+
+// Peek returns metadata without consuming the code. Used by the guest CLI
+// to fetch the services list before the user commits to redeeming. The
+// return shape excludes secrets so a future caller cannot accidentally
+// expose them by reading the bundle pointer.
+func (s *bootstrapStore) Peek(code string) (peekView, bool, bool) {
 	n := normalizeCode(code)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, ok := s.bundles[n]
 	if !ok {
-		return nil, false, false
+		return peekView{}, false, false
 	}
 	if b.consumed || !time.Now().Before(b.expiresAt) {
-		return nil, true, true
+		return peekView{}, true, true
 	}
-	return b, true, false
+	return peekView{
+		ShareID:      b.ShareID,
+		ExpectedName: b.ExpectedName,
+		HostName:     b.HostName,
+		Reason:       b.Reason,
+		Services:     append([]bundleService(nil), b.Services...),
+		ExpiresAt:    b.expiresAt,
+	}, true, false
 }
 
 // Redeem returns (bundle, found, alreadyUsed). found=false means the code has

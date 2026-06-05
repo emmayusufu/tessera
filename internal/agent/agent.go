@@ -232,12 +232,22 @@ func hasEnv(env []string, key string) bool {
 
 // readSize reads the 8-byte size header sent by the guest as the very first
 // bytes of the stream: rows uint32 big-endian, then cols uint32 big-endian.
+// Values are clamped to maxDim before the uint16 downcast pty.Winsize wants,
+// so a malicious guest sending rows=70000 can't wrap to 4464 or otherwise
+// confuse the host's terminal.
 func readSize(r io.Reader) (rows, cols uint16, err error) {
+	const maxDim = 9999
 	var hdr [8]byte
 	if _, err = io.ReadFull(r, hdr[:]); err != nil {
 		return 0, 0, err
 	}
-	rows = uint16(binary.BigEndian.Uint32(hdr[0:4]))
-	cols = uint16(binary.BigEndian.Uint32(hdr[4:8]))
-	return rows, cols, nil
+	rowsRaw := binary.BigEndian.Uint32(hdr[0:4])
+	colsRaw := binary.BigEndian.Uint32(hdr[4:8])
+	if rowsRaw > maxDim {
+		rowsRaw = maxDim
+	}
+	if colsRaw > maxDim {
+		colsRaw = maxDim
+	}
+	return uint16(rowsRaw), uint16(colsRaw), nil
 }

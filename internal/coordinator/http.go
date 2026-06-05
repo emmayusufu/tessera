@@ -159,7 +159,7 @@ func (c *Coordinator) handlePeek(w http.ResponseWriter, r *http.Request) {
 	if !c.rlGate(w, r, normalized, "peek") {
 		return
 	}
-	b, found, used := c.bootstrap.Peek(normalized)
+	pv, found, used := c.bootstrap.Peek(normalized)
 	if !found {
 		c.rl.idFail(normalized)
 		http.Error(w, "unknown code", http.StatusNotFound)
@@ -169,17 +169,17 @@ func (c *Coordinator) handlePeek(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "code already used or expired", http.StatusGone)
 		return
 	}
-	names := make([]string, 0, len(b.Services))
-	for _, s := range b.Services {
+	names := make([]string, 0, len(pv.Services))
+	for _, s := range pv.Services {
 		names = append(names, s.Name)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(peekResponseBody{
-		ExpectedName: b.ExpectedName,
-		HostName:     b.HostName,
-		Reason:       b.Reason,
+		ExpectedName: pv.ExpectedName,
+		HostName:     pv.HostName,
+		Reason:       pv.Reason,
 		ServiceNames: names,
-		ExpiresAt:    b.expiresAt.UTC().Format(time.RFC3339),
+		ExpiresAt:    pv.ExpiresAt.UTC().Format(time.RFC3339),
 	})
 }
 
