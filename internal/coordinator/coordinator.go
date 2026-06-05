@@ -194,7 +194,14 @@ func (c *Coordinator) Serve(ctx context.Context, httpAddr, certFile, keyFile str
 	}
 	defer ln.Close()
 
-	httpSrv := &http.Server{Addr: httpAddr, Handler: c.httpMux()}
+	httpSrv := &http.Server{
+		Addr:              httpAddr,
+		Handler:           c.httpMux(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	go func() {
 		<-ctx.Done()
 		ln.Close()
