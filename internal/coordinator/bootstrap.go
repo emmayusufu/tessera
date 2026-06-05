@@ -211,13 +211,24 @@ func (s *bootstrapStore) sweep() {
 }
 
 func newCode() (string, error) {
-	var raw [8]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
+	// Rejection sampling: draw bytes, accept only those that fall in a range
+	// evenly divisible by the alphabet size, so every alphabet character has
+	// exactly the same probability. Plain `byte % 30` would bias 16 of the
+	// 30 chars to 9/256 and the other 14 to 8/256.
+	const n = len(bootstrapAlphabet)
+	const ceiling = 256 - (256 % n) // 240 for n=30
 	out := make([]byte, 0, 9)
-	for i, r := range raw {
-		out = append(out, bootstrapAlphabet[int(r)%len(bootstrapAlphabet)])
+	var one [1]byte
+	for i := 0; i < 8; i++ {
+		for {
+			if _, err := rand.Read(one[:]); err != nil {
+				return "", err
+			}
+			if int(one[0]) < ceiling {
+				out = append(out, bootstrapAlphabet[int(one[0])%n])
+				break
+			}
+		}
 		if i == 3 {
 			out = append(out, '-')
 		}
