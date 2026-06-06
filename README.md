@@ -3,14 +3,22 @@
 > Status: pre-1.0, no independent security review. Do not use it to guard
 > production or sensitive systems without one. See [SECURITY.md](SECURITY.md).
 
-Tessera is a consent-gated remote access broker. One person (the **guest**) asks
-for temporary access to a system someone else (the **host**) owns. The host
-approves with one tap on their own device. A scoped, audited, mutually-revocable
-tunnel opens for as long as either side holds it.
+Tessera is a consent-gated remote access broker for "give Alice access to my
+local postgres, just for this debug session, with a paper trail, end it when
+we're done."
 
-The point is that the approving step stays trivial. The host sees who is asking,
-what they want to reach, and why, then taps Approve. No VPN, no shared password,
-no permanent account.
+`tessera share -port 5432` mints an 8-character code. Alice runs `tessera join
+CODE`, you see a prompt at your terminal showing who is asking and why, type
+`y`, and her local `127.0.0.1:13000` now forwards to your `5432` for as long as
+either side holds the session. Every request, approval, and session close lands
+in an append-only audit log.
+
+Not a VPN, not a stable public URL, not a persistent account. The whole point
+is that nothing lives between sessions: no token your teammate keeps, no port
+left open, no record other than the audit line you wrote.
+
+**Live coordinator:** [`tessera.jengahq.com`](https://tessera.jengahq.com/healthz)
+(returns the current version; the actual data path is mTLS on `:8443`).
 
 The name is the Roman *tessera hospitalis*, a token given to a guest as proof of
 a trusted, welcomed relationship.
@@ -35,15 +43,17 @@ git clone https://github.com/emmayusufu/tessera && cd tessera && make build
 ## When you might use it
 
 - **Pair programming across networks.** You want a teammate to hit your local
-  dev server on `localhost:3000`. Send them a Tessera link, approve once, they
-  reach it; Ctrl-C ends it.
-- **Support sessions.** A customer can't reproduce a bug. You ask to reach their
-  dev box for ten minutes; they approve from their phone.
-- **Homelab access.** A friend wants to use your media server briefly. You
-  approve from the kitchen.
-- **Consulting into an internal system.** A remote contractor needs to look at
-  an internal database; an on-site staff member approves; access closes when the
-  session ends.
+  dev server on `localhost:3000`. They run `tessera join`, you type `y` in your
+  terminal, they reach it; Ctrl-C ends it.
+- **Support sessions.** A customer can't reproduce a bug. They run `tessera
+  share`, send you the code, you join, they watch and approve at their
+  terminal. When the call's over, the share dies.
+- **Database debugging.** A contractor needs to look at your staging postgres
+  for fifteen minutes; you share the port, they connect, you see every request
+  flow through the audit log.
+- **One-off shell access.** Same shape with `tessera share -shell` for a PTY
+  attached to your machine. Read the [SECURITY.md](SECURITY.md) section on what
+  `-shell` actually exposes before you use it.
 
 ## How it works
 
