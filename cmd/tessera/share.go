@@ -54,18 +54,19 @@ func (f *flagSlice) String() string     { return strings.Join(*f, ",") }
 func (f *flagSlice) Set(v string) error { *f = append(*f, v); return nil }
 
 // parseServiceFlag splits a "name=host:port[@kind]" value. If @kind is
-// omitted, the kind is inferred from the port. Whitespace around each part
-// is trimmed; the host:port is validated; unknown kinds error out so a typo
-// fails loud instead of silently degrading to generic-tcp.
-func parseServiceFlag(raw string) (shareService, error) {
+// omitted, the kind is inferred from the port; the second return value is
+// true when inference fired so callers can surface it. Whitespace around
+// each part is trimmed; the host:port is validated; unknown kinds error
+// out so a typo fails loud instead of silently degrading to generic-tcp.
+func parseServiceFlag(raw string) (shareService, bool, error) {
 	eq := strings.IndexByte(raw, '=')
 	if eq <= 0 {
-		return shareService{}, fmt.Errorf("service %q must be name=host:port[@kind]", raw)
+		return shareService{}, false, fmt.Errorf("service %q must be name=host:port[@kind]", raw)
 	}
 	name := strings.TrimSpace(raw[:eq])
 	rest := strings.TrimSpace(raw[eq+1:])
 	if name == "" || rest == "" {
-		return shareService{}, fmt.Errorf("service %q must be name=host:port[@kind]", raw)
+		return shareService{}, false, fmt.Errorf("service %q must be name=host:port[@kind]", raw)
 	}
 	target := rest
 	kind := ""
@@ -73,16 +74,17 @@ func parseServiceFlag(raw string) (shareService, error) {
 		target = strings.TrimSpace(rest[:at])
 		kind = strings.TrimSpace(rest[at+1:])
 		if !isValidKind(kind) {
-			return shareService{}, fmt.Errorf("service %q: unknown kind %q (want one of %s)", raw, kind, kindList)
+			return shareService{}, false, fmt.Errorf("service %q: unknown kind %q (want one of %s)", raw, kind, kindList)
 		}
 	}
 	if _, _, err := net.SplitHostPort(target); err != nil {
-		return shareService{}, fmt.Errorf("service %q: bad target: %w", raw, err)
+		return shareService{}, false, fmt.Errorf("service %q: bad target: %w", raw, err)
 	}
-	if kind == "" {
+	inferred := kind == ""
+	if inferred {
 		kind = inferKindFromTarget(target)
 	}
-	return shareService{Name: name, Target: target, Kind: kind}, nil
+	return shareService{Name: name, Target: target, Kind: kind}, inferred, nil
 }
 
 func cmdShare(args []string) {
@@ -154,10 +156,13 @@ func cmdShare(args []string) {
 			os.Exit(2)
 		}
 		for _, raw := range services {
-			s, err := parseServiceFlag(raw)
+			s, inferred, err := parseServiceFlag(raw)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "share:", err)
 				os.Exit(2)
+			}
+			if inferred {
+				fmt.Println(dim(fmt.Sprintf("inferring kind=%s for %s (%s). Use name=host:port@kind to override.", s.Kind, s.Name, s.Target)))
 			}
 			svcList = append(svcList, s)
 		}
@@ -173,6 +178,7 @@ func cmdShare(args []string) {
 		kind := *kindFlag
 		if kind == "" {
 			kind = inferKindFromTarget(resolvedTarget)
+			fmt.Println(dim(fmt.Sprintf("inferring kind=%s from %s. Use -kind to override.", kind, resolvedTarget)))
 		}
 		svcList = []shareService{{Name: "default", Target: resolvedTarget, Kind: kind}}
 	}
