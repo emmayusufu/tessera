@@ -134,6 +134,10 @@ The coordinator needs to run on a host with a public address. Two ways: Docker
 or a bare binary. Pick whichever feels lighter to maintain. The flags and env
 vars are the same in both.
 
+For step-by-step instructions (systemd unit, compose, operator token, upgrade
+path), see [`deploy/DEPLOYING.md`](deploy/DEPLOYING.md). The bits below are the
+short version.
+
 ### Run with Docker
 
 The image is a single 18 MB static binary on distroless. One image holds all
@@ -197,6 +201,42 @@ open inbound ports 8443 and 8080 on its firewall, and a TLS cert for the HTTP
 endpoints if you want HTTPS (recommended in production to keep the redeem
 response, which carries a guest private key, confidential in transit). Docker
 doesn't change any of that. It just makes "run the coordinator process" boring.
+
+### Verifying a release
+
+Releases are produced by GitHub Actions on tag push. Each tag publishes 12
+binaries (tessera, agent, coordinator for linux/{amd64,arm64} and
+darwin/{amd64,arm64}) plus a multi-arch container image to GHCR.
+
+Confirm what landed:
+
+```bash
+# Binary assets and digests
+gh release view v0.3.0 --json assets --jq '.assets[] | "\(.size) \(.name)"'
+
+# Image was published and reports the expected version
+docker run --rm --entrypoint /usr/local/bin/tessera \
+  ghcr.io/emmayusufu/tessera:0.3.0 version
+# v0.3.0
+
+# Multi-arch manifest
+docker buildx imagetools inspect ghcr.io/emmayusufu/tessera:0.3.0
+```
+
+If the version baked into the image doesn't match the tag, the release
+pipeline didn't run cleanly: check the workflow at `.github/workflows/release.yml`
+and the run logs in the GitHub Actions tab.
+
+Live coordinators also expose `/healthz` on the HTTP port. Point any uptime
+monitor at it:
+
+```bash
+curl https://your-coordinator/healthz
+# ok v0.3.0
+```
+
+A change in the version string is the cheapest signal that a redeploy
+actually went through.
 
 ## What's enforced
 
