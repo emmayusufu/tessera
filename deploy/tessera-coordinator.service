@@ -1,0 +1,40 @@
+# systemd unit for the native-binary deployment. Copy to
+# /etc/systemd/system/tessera-coordinator.service on the host. The
+# operator token belongs in an override file, not in this unit:
+#
+#   sudo systemctl edit tessera-coordinator
+#
+# adding:
+#   [Service]
+#   Environment=TESSERA_OPERATOR_TOKEN=<the token>
+#
+# so the secret doesn't sit in version control. See DEPLOYING.md for
+# the full walkthrough, including the docker-compose alternative.
+
+[Unit]
+Description=Tessera coordinator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tessera
+Group=tessera
+ExecStart=/usr/local/bin/coordinator \
+  -listen :8443 \
+  -http :8080 \
+  -ca /etc/tessera/ca.crt \
+  -cert /etc/tessera/coordinator.crt \
+  -key /etc/tessera/coordinator.key \
+  -audit /var/lib/tessera/audit.jsonl
+Restart=on-failure
+RestartSec=3s
+WorkingDirectory=/var/lib/tessera
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tessera
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

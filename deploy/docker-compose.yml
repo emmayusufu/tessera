@@ -1,0 +1,28 @@
+# Production-shape compose for running the coordinator from the published
+# GHCR image. Bind-mounts certs and the audit log onto the host filesystem
+# so you can rotate certs without rebuilding and tail the audit log with
+# normal tools (tail -f /var/lib/tessera/audit.jsonl).
+#
+# Operator token comes from an env file next to this compose, named
+# tessera.env, gitignored. See DEPLOYING.md for the full walkthrough.
+
+services:
+  coordinator:
+    image: ghcr.io/emmayusufu/tessera:0.3.0
+    container_name: tessera-coordinator
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+      - "8080:8080"
+    volumes:
+      - /etc/tessera:/etc/tessera:ro
+      - /var/lib/tessera:/var/lib/tessera
+    env_file:
+      - tessera.env
+    command:
+      - "-listen=:8443"
+      - "-http=:8080"
+      - "-ca=/etc/tessera/ca.crt"
+      - "-cert=/etc/tessera/coordinator.crt"
+      - "-key=/etc/tessera/coordinator.key"
+      - "-audit=/var/lib/tessera/audit.jsonl"
