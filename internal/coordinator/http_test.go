@@ -1,10 +1,12 @@
 package coordinator
 
 import (
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/emmayusufu/tessera/internal/audit"
@@ -18,6 +20,31 @@ func newTestCoordinator(t *testing.T) *Coordinator {
 	}
 	t.Cleanup(func() { log.Close() })
 	return New(log, func() (net.Listener, error) { return nil, nil })
+}
+
+func TestHealthzOK(t *testing.T) {
+	c := newTestCoordinator(t)
+	srv := httptest.NewServer(c.httpMux())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("healthz status = %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(body), "ok ") {
+		t.Fatalf("healthz body = %q, want prefix \"ok \"", string(body))
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Fatalf("healthz content-type = %q, want text/plain; charset=utf-8", ct)
+	}
 }
 
 func TestRevokeRequiresOperatorToken(t *testing.T) {

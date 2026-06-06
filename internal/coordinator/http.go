@@ -10,14 +10,27 @@ import (
 	"time"
 
 	"github.com/emmayusufu/tessera/internal/audit"
+	"github.com/emmayusufu/tessera/internal/version"
 )
 
 func (c *Coordinator) httpMux() *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("POST /s/{id}/revoke", c.handleRevoke)
 	mux.HandleFunc("POST /redeem/{code}", c.handleRedeem)
 	mux.HandleFunc("GET /peek/{code}", c.handlePeek)
 	return mux
+}
+
+// handleHealthz is a tiny liveness probe for external uptime monitors.
+// Returns plain text "ok <version>\n" with status 200 when the HTTP event
+// loop is alive. Deliberately skips the rate limiter so a 60s-interval
+// probe doesn't trip the 5/min per-IP burst limit. Leaks nothing beyond
+// the version string, which is already in every response header anyway.
+func handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = fmt.Fprintf(w, "ok %s\n", version.Version)
 }
 
 func (c *Coordinator) operatorOK(r *http.Request) bool {
