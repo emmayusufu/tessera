@@ -1,5 +1,9 @@
 # Tessera
 
+<p align="center">
+  <img src="tessera-social-preview.png" alt="Tessera — consent-gated remote access. One person asks, the host approves, a scoped tunnel opens." width="100%">
+</p>
+
 > Status: pre-1.0, no independent security review. Do not use it to guard
 > production or sensitive systems without one. See [SECURITY.md](SECURITY.md).
 
