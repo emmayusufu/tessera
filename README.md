@@ -17,11 +17,10 @@ Not a VPN, not a stable public URL, not a persistent account. The whole point
 is that nothing lives between sessions: no token your teammate keeps, no port
 left open, no record other than the audit line you wrote.
 
-**Live coordinator:** [`tessera.jengahq.com`](https://tessera.jengahq.com/healthz)
-(returns the current version; the actual data path is mTLS on `:8443`).
-
 The name is the Roman *tessera hospitalis*, a token given to a guest as proof of
 a trusted, welcomed relationship.
+
+![Tessera demo](demo.gif)
 
 ## Install
 
