@@ -1,7 +1,7 @@
 # Tessera
 
 <p align="center">
-  <img src="tessera-social-preview.png" alt="Tessera — consent-gated remote access. One person asks, the host approves, a scoped tunnel opens." width="100%">
+  <img src="assets/social-preview.png" alt="Tessera — consent-gated remote access. One person asks, the host approves, a scoped tunnel opens." width="100%">
 </p>
 
 > Status: pre-1.0, no independent security review. Do not use it to guard
@@ -24,7 +24,7 @@ left open, no record other than the audit line you wrote.
 The name is the Roman *tessera hospitalis*, a token given to a guest as proof of
 a trusted, welcomed relationship.
 
-![Tessera demo](demo.gif)
+![Tessera demo](assets/demo.gif)
 
 ## Install
 
